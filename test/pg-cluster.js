@@ -29,8 +29,16 @@ function startCluster(bin) {
   let r = spawnSync(path.join(bin, `initdb${EXE}`), ['-D', data, '-U', 'postgres', '-A', 'trust', '-E', 'UTF8', '--no-sync'], { stdio: 'ignore' });
   if (r.status !== 0) throw new Error('initdb failed');
   // stdio ignored: a server that inherits the caller's pipes keeps it from exiting.
-  r = spawnSync(path.join(bin, `pg_ctl${EXE}`), ['-D', data, '-o', `-p ${port} -c fsync=off -c full_page_writes=off`, '-l', path.join(data, 'log.txt'), '-w', 'start'], { stdio: 'ignore' });
-  if (r.status !== 0) throw new Error('pg_ctl start failed');
+  // Debian/Ubuntu builds put the socket in /var/run/postgresql, which a normal
+  // user can't write; keep it in the throwaway data dir (psql uses TCP anyway).
+  const socket = process.platform === 'win32' ? '' : ` -c unix_socket_directories='${data}'`;
+  const log = path.join(data, 'log.txt');
+  r = spawnSync(path.join(bin, `pg_ctl${EXE}`), ['-D', data, '-o', `-p ${port} -c fsync=off -c full_page_writes=off${socket}`, '-l', log, '-w', 'start'], { stdio: 'ignore' });
+  if (r.status !== 0) {
+    let tailLog = '';
+    try { tailLog = fs.readFileSync(log, 'utf8').trim().split('\n').slice(-5).join('\n'); } catch { /* no log written */ }
+    throw new Error(`pg_ctl start failed${tailLog ? `:\n${tailLog}` : ''}`);
+  }
   r = spawnSync(path.join(bin, `psql${EXE}`), [`postgresql://postgres@127.0.0.1:${port}/postgres`, '-X', '-v', 'ON_ERROR_STOP=1'],
     { input: 'CREATE ROLE anon; CREATE ROLE authenticated;', encoding: 'utf8' });
   if (r.status !== 0) throw new Error(`creating the API roles failed: ${r.stderr}`);
