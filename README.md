@@ -110,7 +110,12 @@ You don't run anything before a push: the push gate does that on its own.
 
 ## Can strangers read your Supabase data? (one query, no install)
 
+All it needs is Node 18+: no plugin, no packages, no database access from
+your machine.
+
 ```
+git clone https://github.com/Vibecheck-QA/qa-ai-os.git
+cd qa-ai-os
 node scripts/rls-check.js --print-query > query.sql
 ```
 
