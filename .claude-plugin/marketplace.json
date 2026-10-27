@@ -1,0 +1,14 @@
+{
+  "name": "qa-ai-os",
+  "owner": {
+    "name": "Vibecheck QA"
+  },
+  "description": "QA AI OS: quality gates and critical thinking across the software lifecycle, idea to sunset or sale.",
+  "plugins": [
+    {
+      "name": "qa-ai-os",
+      "source": "./",
+      "description": "Quality gates across the software lifecycle, idea to sunset or sale."
+    }
+  ]
+}

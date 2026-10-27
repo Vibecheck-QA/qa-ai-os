@@ -1,0 +1,19 @@
+{
+  "description": "QA AI OS push gate: blocks git push unless the repo's configured gates pass on the commit being pushed.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/push-gate.js"],
+            "timeout": 600,
+            "onFailure": "block"
+          }
+        ]
+      }
+    ]
+  }
+}
