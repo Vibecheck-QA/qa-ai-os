@@ -37,7 +37,7 @@ re-earned, and a check that never catches anything gets cut. See
 ## Install (Claude Code)
 
 ```
-/plugin marketplace add Vibecheck-QA/qa-ai-os
+/plugin marketplace add Vibecheck-QA/vibecheck
 /plugin install qa-ai-os@qa-ai-os
 ```
 
@@ -110,7 +110,12 @@ You don't run anything before a push: the push gate does that on its own.
 
 ## Can strangers read your Supabase data? (one query, no install)
 
+All it needs is Node 18+: no plugin, no packages, no database access from
+your machine.
+
 ```
+git clone https://github.com/Vibecheck-QA/vibecheck.git
+cd vibecheck
 node scripts/rls-check.js --print-query > query.sql
 ```
 
