@@ -45,6 +45,69 @@ Then in your repo: `/qa-ai-os:init`.
 
 Repos opt in: the push gate does nothing in a repo without `.qa-ai-os.json`.
 
+## When to use what
+
+| You're here | Run |
+|---|---|
+| Just installed, nothing set up yet | `/qa-ai-os:init` |
+| Supabase app: can one user see another's data? | `/qa-ai-os:first-tests` (no local database? the [one-query check](#can-strangers-read-your-supabase-data-one-query-no-install)) |
+| Taking money with Stripe | `/qa-ai-os:first-tests` (the money paths) |
+| Finished a change and want it checked | `/qa-ai-os:review` |
+| "Would this test even notice if the check broke?" | `/qa-ai-os:mutate` |
+| UI text is hard to read, or dark mode is off | `/qa-ai-os:design` |
+| Deciding whether to build an idea | `/qa-ai-os:gate idea` |
+| About to ship | `/qa-ai-os:gate ship` |
+
+You don't run anything before a push: the push gate does that on its own.
+
+## Your first hour
+
+1. **Install, then `/qa-ai-os:init`.** It finds your test command and writes
+   `.qa-ai-os.json`:
+
+   ```json
+   { "gates": [ { "name": "tests", "run": "npm test", "timeoutSeconds": 120 } ] }
+   ```
+
+   Then it proves the gate can fail: it adds a test that must fail, runs the
+   gate, checks it goes red, removes the test and checks it goes green again.
+   A gate that can't fail protects nothing.
+
+2. **Let your agent work as normal.** Say it "simplifies" a price function
+   and drops the quantity:
+
+   ```diff
+   - module.exports.total = (items) => items.reduce((s, i) => s + i.price * i.qty, 0);
+   + module.exports.total = (items) => items.reduce((s, i) => s + i.price, 0);
+   ```
+
+   It commits and runs `git push`. The push gate runs your tests on that exact
+   commit first:
+
+   ```
+   QA AI OS push gate: "tests" failed (exit 1). Push blocked.
+   Command: npm test
+   Last 25 lines:
+       Expected values to be strictly equal:
+
+       5 !== 15
+   ...
+   # pass 0
+   # fail 1
+   ```
+
+   Nothing reaches the remote. The agent sees the reason and has to fix the
+   code, not the report. Once a commit passes, pushing it again doesn't re-run
+   the gates; a failure is never remembered, so every retry re-checks.
+
+3. **Write the tests that matter.** On a Supabase or Stripe app, run
+   `/qa-ai-os:first-tests`. It adds the checks for the bugs that hurt most
+   (user A reading user B's rows, paid features for free) and proves each test
+   can fail.
+
+4. **Before you merge, `/qa-ai-os:review`.** It sizes the change from the
+   diff and spends only that size's review budget.
+
 ## Can strangers read your Supabase data? (one query, no install)
 
 ```
