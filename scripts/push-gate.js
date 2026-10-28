@@ -25,6 +25,7 @@ const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 const { TIMEOUT_MARK } = require('./run-timed.js');
 const { testCounts } = require('./test-counts.js');
+const { diffCoverage } = require('./diff-coverage.js');
 
 const CONFIG_FILE = '.qa-ai-os.json';
 const OUTPUT_TAIL_LINES = 25;
@@ -42,6 +43,16 @@ function gateCommand(gate) {
     return script ? `"${process.execPath}" "${script}"` : null;
   }
   return gate && typeof gate.run === 'string' && gate.run ? gate.run : null;
+}
+
+// "changedLines": { "lcov": "coverage/lcov.info", "include": ["src/"], "exclude"?, "min"?, "base"? }
+function validChangedLines(s) {
+  const str = (v) => typeof v === 'string' && v.length > 0;
+  return Boolean(s) && typeof s === 'object' && str(s.lcov)
+    && Array.isArray(s.include) && s.include.length > 0 && s.include.every(str)
+    && (s.exclude === undefined || (Array.isArray(s.exclude) && s.exclude.every(str)))
+    && (s.min === undefined || (typeof s.min === 'number' && s.min >= 0 && s.min <= 100))
+    && (s.base === undefined || str(s.base));
 }
 
 // Split a shell command into simple segments on ; && || | and newlines.
@@ -128,6 +139,10 @@ function evaluate({ command, cwd, dataDir }) {
   if (badLimit) {
     return { allow: false, reason: `QA AI OS push gate: gate ${JSON.stringify(badLimit)}: "minTests" and "maxSkipped" must be whole numbers, 0 or more. Push blocked.` };
   }
+  const badCoverage = gates.find((g) => g && g.changedLines !== undefined && !validChangedLines(g.changedLines));
+  if (badCoverage) {
+    return { allow: false, reason: `QA AI OS push gate: gate ${JSON.stringify(badCoverage)}: "changedLines" needs "lcov" (the coverage file the run writes) and "include" (a list of source folders); "min" is 0-100. Push blocked.` };
+  }
   const unrunnable = gates.find((g) => !gateCommand(g));
   if (unrunnable) {
     return { allow: false, reason: `QA AI OS push gate: gate ${JSON.stringify(unrunnable)} has no "run" command or a known "builtin" (${Object.keys(BUILTINS).join(', ')}). Push blocked.` };
@@ -157,6 +172,12 @@ function evaluate({ command, cwd, dataDir }) {
     const cmd = gateCommand(gate);
     const name = gate.name || gate.run || gate.builtin;
     const timeoutMs = (gate.timeoutSeconds || 300) * 1000;
+    // A coverage file left from an earlier run would vouch for code this run never ran.
+    if (gate.changedLines) {
+      try { fs.rmSync(path.resolve(root, gate.changedLines.lcov), { force: true }); } catch (err) {
+        return { allow: false, reason: `QA AI OS push gate: couldn't clear the old coverage file ${gate.changedLines.lcov} before "${name}" (${err.message}). Push blocked.` };
+      }
+    }
     const started = Date.now();
     // run-timed.js kills the whole tree on timeout; spawnSync's own timeout leaves the command running.
     const r = spawnSync(process.execPath, [path.join(__dirname, 'run-timed.js'), String(timeoutMs), cmd],
@@ -186,6 +207,28 @@ function evaluate({ command, cwd, dataDir }) {
       }
       if (gate.maxSkipped !== undefined && counts.skipped > gate.maxSkipped) {
         return { allow: false, reason: `QA AI OS push gate: "${name}" skipped ${counts.skipped} tests (allowed ${gate.maxSkipped}). Push blocked.` };
+      }
+    }
+    // Passing tests prove the tests pass, not that they ran the change.
+    if (gate.changedLines) {
+      const cov = diffCoverage(root, gate.changedLines, { worktree: Boolean(dirty) });
+      if (cov.error) {
+        return { allow: false, reason: `QA AI OS push gate: "${name}" passed, but QA AI OS can't tell whether it ran the changed lines: ${cov.error} Push blocked: unknown is never covered.` };
+      }
+      const min = gate.changedLines.min === undefined ? 100 : gate.changedLines.min;
+      ran[ran.length - 1].changedLines = { base: cov.base, covered: cov.covered, total: cov.total, min };
+      if (cov.covered * 100 < min * cov.total) {
+        const list = cov.files.slice(0, 20).map((f) => (f.neverLoaded
+          ? `  ${f.file}: no test loaded this file (lines ${f.lines})`
+          : `  ${f.file}: ${f.lines}`)).join('\n');
+        const more = cov.files.length > 20 ? `\n  ...and ${cov.files.length - 20} more files` : '';
+        return {
+          allow: false,
+          reason:
+            `QA AI OS push gate: "${name}" passed, but ${cov.total - cov.covered} of ${cov.total} changed lines never ran in any test ` +
+            `(${cov.percent}%, minimum ${min}%; changes since ${cov.base}). Push blocked.\n${list}${more}\n` +
+            "Write tests that run these lines, then push again. If a file above was tested, its path in the coverage file may not match the repo's.",
+        };
       }
     }
   }

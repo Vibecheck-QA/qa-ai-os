@@ -40,6 +40,17 @@ duration. Then check for known lies:
   Playwright) and blocks below the minimum, or when it can't find a summary at
   all. Rerun the gate to confirm the count reads; if it doesn't, say so and
   leave the limits off rather than install a gate that always blocks.
+- **Green tests that never touch the change?** Offer `"changedLines"` on the
+  test gate: run it with coverage writing an lcov file (commands per runner in
+  the README, "Did the tests run the change?") and set
+  `{ "lcov": "<that file>", "include": [<the source folders>] }`. Pick `include`
+  from where the app code lives (`src/`, `app/`, `lib/`), never the whole repo.
+  Confirm with the user before installing it: from then on every push needs
+  tests that run its changed lines. Check the base resolves
+  (`git rev-parse origin/HEAD`; if not, set `"base"`), add the lcov file to
+  `.gitignore`, and run the gate once on a branch with a small change to
+  confirm it reads. If the lcov file's paths don't match the repo's, say so and
+  leave it off.
 - **Pipelines** (`| grep`, `| tail`, `| tee`) hide the real exit code. A gate
   must be a command whose own exit code means pass/fail.
 - **Type check excludes the tests?** (check `tsconfig` `exclude`, etc.) Say so.
