@@ -1,0 +1,72 @@
+# QA AI OS: every check on every pull request and every push to main.
+#
+# No paths-ignore, on purpose: a "docs-only" or "migration-only" change that
+# skips the tests is how a broken build ships with a green check.
+#
+# Your app's build-time environment (Supabase URL, publishable keys, ...) goes
+# in `env:` below, from repository secrets.
+name: QA AI OS
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: qa-ai-os-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NEXT_TELEMETRY_DISABLED: '1'
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Type check
+        run: npm run typecheck
+      - name: Lint
+        run: npm run --if-present lint
+      - name: Unit and component tests (with coverage)
+        run: npm run test:coverage
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
+      # Chromium only, no --with-deps: ubuntu-latest already has its system
+      # libraries, and --with-deps runs an apt-get that can hang for half an hour.
+      - name: Install browser
+        timeout-minutes: 5
+        run: npx playwright install chromium
+      - name: End-to-end tests (Playwright builds and starts the app)
+        run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: ignore

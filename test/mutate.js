@@ -21,6 +21,7 @@ const TARGETS = {
   'scripts/run-timed.js': 'test/mutate-runner.test.js',
   'scripts/test-counts.js': 'test/test-counts.test.js',
   'scripts/diff-coverage.js': 'test/diff-coverage.test.js',
+  'scripts/stack.js': 'test/stack.test.js',
 };
 
 // Lanes run side by side; within a lane, one mutant at a time. Scripts that load
@@ -31,6 +32,7 @@ const LANES = [
   ['scripts/push-gate.js', 'scripts/run-timed.js', 'scripts/test-counts.js', 'scripts/diff-coverage.js', 'scripts/mutate.js'],
   ['scripts/design-check.js'],
   ['scripts/rls-check.js'],
+  ['scripts/stack.js'],
 ];
 for (const f of Object.keys(TARGETS)) {
   if (LANES.flat().filter((x) => x === f).length !== 1) throw new Error(`${f} must be in exactly one lane`);
@@ -203,7 +205,25 @@ const COVERAGE_GATE = [
   { name: '"min" out of range is accepted', find: " && s.min >= 0 && s.min <= 100))", replace: '))' },
 ];
 
+const STACK = [
+  { name: 'an existing file is overwritten', find: 'for (const f of layer.files) (fs.existsSync(path.join(dir, f)) ? out.files.keep : out.files.add).push(f);', replace: 'for (const f of layer.files) out.files.add.push(f);' },
+  { name: 'an existing script is overwritten', find: 'if (scripts[s] === undefined) out.scripts.add[s] = cmd;', replace: 'out.scripts.add[s] = cmd; if (false) {}' },
+  { name: 'a different script command is not reported', find: "else if (scripts[s] !== cmd) out.scripts.keep.push({ name: s, yours: scripts[s], ours: cmd });", replace: '' },
+  { name: 'a layer you already use is replaced', find: "if (have) { out.layers[name] = `keep: ${have}`; continue; }", replace: '' },
+  { name: 'installed packages are installed again', find: '.filter(([d]) => !deps[d])', replace: '' },
+  { name: 'pnpm is ignored', find: "if (fs.existsSync(path.join(dir, 'pnpm-lock.yaml')))", replace: 'if (false)' },
+  { name: '.gitignore entries are duplicated', find: 'if (!ignore.includes(line)) out.gitignore.push(line);', replace: 'out.gitignore.push(line);' },
+  { name: '.gitignore glued to the last line', find: "const sep = before && !before.endsWith('\\n') ? '\\n' : '';", replace: "const sep = '';" },
+  { name: 'CRLF package.json becomes LF', find: "const nl = raw.includes('\\r\\n') ? '\\r\\n' : '\\n';", replace: "const nl = '\\n';" },
+  { name: 'indentation is reset', find: "const indent = (/^\\{\\r?\\n([ \\t]+)\"/.exec(raw) || [, '  '])[1];", replace: "const indent = '  ';" },
+  { name: 'the coverage list is never filled in', find: "text = text.replace('__COVERAGE_INCLUDE__',", replace: "text = text.replace('__NOTHING__'," },
+  { name: 'changedLines with no source folders', find: '...(dirs.length ? { changedLines:', replace: '...(true ? { changedLines:' },
+  { name: 'a Node version at the floor is too old', find: '  return true;\n}\n\n// The source folders', replace: '  return false;\n}\n\n// The source folders' },
+  { name: 'a non-Next app gets the stack', find: "if (!deps[stack.detect]) return", replace: 'if (false) return' },
+];
+
 const MUTANTS = [
+  ...STACK.map((m) => ({ ...m, file: 'scripts/stack.js' })),
   ...PUSH_GATE.map((m) => ({ ...m, file: 'scripts/push-gate.js' })),
   ...DESIGN.map((m) => ({ ...m, file: 'scripts/design-check.js' })),
   ...RLS.map((m) => ({ ...m, file: 'scripts/rls-check.js' })),
@@ -213,6 +233,14 @@ const MUTANTS = [
   ...COVERAGE_GATE.map((m) => ({ ...m, file: 'scripts/push-gate.js', suite: 'test/diff-coverage.test.js' })),
   { file: 'scripts/run-timed.js', name: 'a timeout kills only the shell', find: "if (win) spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });\n    else { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* already gone */ } }", replace: 'child.kill();' },
 ];
+
+// While developing: QA_MUTATE_ONLY=scripts/stack.js checks one file's mutants.
+// The result line says so, so a partial run never reads as the full check.
+const ONLY = process.env.QA_MUTATE_ONLY;
+if (ONLY) {
+  if (!TARGETS[ONLY]) throw new Error(`QA_MUTATE_ONLY: ${ONLY} is not a target`);
+  MUTANTS.splice(0, MUTANTS.length, ...MUTANTS.filter((m) => m.file === ONLY));
+}
 
 // One Postgres cluster for the whole run (~10 s each to start), shared with every
 // test process through QA_PG_PORT. Each test process still makes its own databases.
@@ -285,8 +313,8 @@ main().then((survived) => {
     }
   }
   console.log(survived === 0 ? `
-All ${MUTANTS.length} mutants killed.` : `
-${survived} of ${MUTANTS.length} mutants survived.`);
+All ${MUTANTS.length} mutants killed${ONLY ? ` (${ONLY} ONLY, not the full check)` : ''}.` : `
+${survived} of ${MUTANTS.length} mutants survived${ONLY ? ` (${ONLY} only)` : ''}.`);
   process.exit(survived === 0 ? 0 : 1);
 }, (err) => {
   restoreAll();
