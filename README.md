@@ -20,12 +20,12 @@ Scripts run before any AI, the cheap model does the routing, a pass is never
 re-earned, and a check that never catches anything gets cut. See
 `rules/QUALITY.md` §0.
 
-## What's in v0.11
+## What's in v0.12
 
 | Piece | What it does |
 |---|---|
 | **Push gate** (hook) | When an AI agent runs `git push`, re-runs your gates on the exact commit being pushed and blocks the push if any fails. Catches the classic `tests \| grep FAIL && git push` lie. Can also require that the tests [ran the lines you changed](#did-the-tests-run-the-change). Every pass leaves a [receipt](#receipts): the commit, each command, its exit code and output. Remembers a pass per commit; never remembers a failure. Fails closed. |
-| `/qa-ai-os:init` | Detects your stack, proposes honest gate commands, proves they can pass *and* fail, and installs the quality contract into `AGENTS.md` so every AI agent (Claude, Codex, Cursor) reads the same rules. |
+| `/qa-ai-os:init` | Detects your stack, proposes honest gate commands, proves they can pass *and* fail, and installs the quality contract into `AGENTS.md` so every AI agent (Claude, Codex, Cursor) reads the same rules. On a Next.js app with no tests, it offers the [recommended stack](#the-recommended-stack-nextjs). |
 | `/qa-ai-os:gate <stage>` | Runs a lifecycle gate — asks technical and business questions, collects evidence, returns PASS / HOLD / KILL, saves the verdict. |
 | `/qa-ai-os:review` | The critic loop: classify the change from the diff, spend only that tier's budget, send it to your configured reviewer (Codex, Claude, Gemini, a PR bot, a fresh session, or a human), answer every finding, verify, split when findings or rounds pile up. |
 | `/qa-ai-os:design` | Agrees a short `DESIGN.md` with you from what your repo already has, then turns every rule a script can check into a push gate: text contrast in every mode (light, dark) read from your tokens, and banned patterns such as light-grey text. Only the rules no script can check go to AI review, inside the normal review round. |
@@ -44,6 +44,40 @@ re-earned, and a check that never catches anything gets cut. See
 Then in your repo: `/qa-ai-os:init`.
 
 Repos opt in: the push gate does nothing in a repo without `.qa-ai-os.json`.
+
+## The recommended stack (Next.js)
+
+Most AI-built apps start with no tests at all, and "use whatever runner you
+have" gives them nothing. On a Next.js app, `/qa-ai-os:init` offers the setup a
+live $3.8k MRR Next.js app runs on, with stricter defaults:
+
+| Piece | Default |
+|---|---|
+| **Vitest + Testing Library** (unit, component) | Coverage on, so the push gate can require tests that [ran the changed lines](#did-the-tests-run-the-change). Each test starts on a clean screen. |
+| **Playwright** (end to end) | A `@smoke` test runs on every push. Playwright builds and starts the app itself. In CI a failing test is retried once for its trace, but a test that only passes on retry still fails: flaky is a bug. |
+| **`tsc --noEmit`** | A push gate. |
+| **CI workflow** | Every check on every pull request. No "docs-only" or "migration-only" skip: a skipped check is how a broken build ships green. |
+
+What `init` adds to the push gate:
+
+```json
+{ "gates": [
+  { "name": "types", "run": "npm run typecheck", "timeoutSeconds": 180 },
+  { "name": "tests", "run": "npm run test:coverage", "timeoutSeconds": 300, "minTests": 3,
+    "changedLines": { "lcov": "coverage/lcov.info", "include": ["lib/", "components/"] } },
+  { "name": "smoke", "run": "npm run test:smoke", "timeoutSeconds": 420, "minTests": 1 }
+] }
+```
+
+- **It never overwrites.** A file you already have is kept; a script with the
+  same name is kept (and `init` tells you if its command differs); a layer you
+  already cover (Jest, Cypress, ...) is skipped whole.
+- **Proven end to end** on every change to this repo: CI applies the stack to a
+  fresh Next.js app, installs it, runs every check, then drives the real push
+  gate and requires it to pass good code and block three kinds of bad code:
+  untested new code, a type error, and a page that throws in the browser.
+- Needs Node 22.13 or newer (Vitest 5). `node <plugin>/scripts/stack.js plan`
+  shows what it would add without changing anything.
 
 ## When to use what
 

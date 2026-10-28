@@ -28,6 +28,40 @@ never invent a script that doesn't exist:
 If there are no tests at all, say so plainly. Don't create a fake gate; offer
 to write the first behaviour test instead.
 
+## 1b. Next.js? Offer the recommended stack
+Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/stack.js" plan`. If `stack` is
+`"nextjs"`, offer the recommended stack, the one a live $3.8k MRR Next.js app
+runs on, with stricter defaults:
+
+- **Vitest + Testing Library** for unit and component tests, with coverage on,
+  so the push gate can require tests that run the changed lines.
+- **Playwright** for end-to-end tests. A `@smoke` test runs on every push;
+  Playwright builds and starts the app itself; a test that only passes on retry
+  fails (flaky is a bug).
+- **A CI workflow** that runs every check on every pull request, with no
+  "docs-only" skip.
+
+Show the plan in plain English: the files it adds, the scripts, the install
+command, and every `layers` entry that says `keep: <tool>` (a tool they
+already use stays; that layer is skipped whole). If `node.ok` is false, stop
+and tell them which Node to install first. Never overwrite: `files.keep` and
+`scripts.keep` list what's already theirs; mention any `scripts.keep` whose
+command differs from ours, and leave it.
+
+On approval: `node "${CLAUDE_PLUGIN_ROOT}/scripts/stack.js" apply`, then run the
+`install` command it printed, then `npx playwright install chromium`. Then
+write the first real tests (one for a function in `lib/` or similar, one for a
+component, importing `test`/`expect` from `vitest`), using `/qa-ai-os:first-tests`
+for anything touching auth, user data or payments. Run `npm run typecheck`,
+`npm run test:coverage` and `npm run test:smoke` and show the results.
+
+Use the plan's `gates` as the starting `.qa-ai-os.json` (step 3). Set
+`minTests` on the `tests` gate from the count you just saw. CI needs the app's
+build-time environment (Supabase URL, publishable keys): tell them which
+secrets to add, never paste values.
+
+Not Next.js (`stack: null`): carry on with the generic path below.
+
 ## 2. Check each gate is honest
 For each candidate, run it **on the current commit** and record exit code and
 duration. Then check for known lies:

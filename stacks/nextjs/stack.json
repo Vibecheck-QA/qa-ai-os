@@ -1,0 +1,45 @@
+{
+  "name": "nextjs",
+  "detect": "next",
+  "node": "22.13.0",
+  "layers": {
+    "unit": {
+      "existing": ["vitest", "jest", "mocha", "ava", "uvu"],
+      "devDependencies": {
+        "vitest": "^5.0.5",
+        "@vitest/coverage-v8": "^5.0.5",
+        "@vitejs/plugin-react": "^6.1.2",
+        "jsdom": "^29.1.1",
+        "@testing-library/react": "^16.3.3",
+        "@testing-library/dom": "^10.4.2",
+        "@testing-library/jest-dom": "^7.0.1",
+        "@testing-library/user-event": "^14.6.8"
+      },
+      "files": ["vitest.config.mts", "vitest.setup.ts"],
+      "scripts": { "test": "vitest run", "test:coverage": "vitest run --coverage" },
+      "gitignore": ["coverage/"]
+    },
+    "e2e": {
+      "existing": ["@playwright/test", "playwright", "cypress"],
+      "devDependencies": { "@playwright/test": "^1.64.1" },
+      "files": ["playwright.config.ts", "e2e/smoke.spec.ts"],
+      "scripts": { "test:e2e": "playwright test", "test:smoke": "playwright test --grep @smoke" },
+      "gitignore": ["playwright-report/", "test-results/"]
+    },
+    "types": {
+      "existing": [],
+      "devDependencies": {},
+      "files": [],
+      "scripts": { "typecheck": "tsc --noEmit" },
+      "gitignore": []
+    },
+    "ci": {
+      "existing": [],
+      "devDependencies": {},
+      "files": [".github/workflows/qa-ai-os.yml"],
+      "scripts": {},
+      "gitignore": [".qa-ai-os/receipts/"]
+    }
+  },
+  "sourceDirs": ["lib", "components", "app/api", "utils", "hooks", "server", "src/lib", "src/components", "src/app/api", "src/utils", "src/hooks", "src/server"]
+}

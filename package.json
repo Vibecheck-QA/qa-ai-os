@@ -1,13 +1,14 @@
 {
   "name": "qa-ai-os",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "private": true,
   "description": "QA AI OS: quality gates across the software lifecycle.",
   "scripts": {
     "test": "node --test \"test/*.test.js\"",
     "mutate": "node test/mutate.js",
     "sync-agents": "node scripts/sync-agents.js",
-    "validate": "claude plugin validate ./"
+    "validate": "claude plugin validate ./",
+    "test:stack": "node test/stack-e2e.js"
   },
   "engines": { "node": ">=18" }
 }
