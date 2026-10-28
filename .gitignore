@@ -2,3 +2,4 @@ node_modules/
 *.log
 .qa-ai-os/receipts/
 .qa-ai-os/mutate-backup/
+lcov.info

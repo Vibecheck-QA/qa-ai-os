@@ -12,6 +12,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
+const tmpDir = require('./tmp.js');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { tomlValue } = require('../scripts/rls-check.js');
@@ -80,7 +81,7 @@ function project(setupSql, rls = {}, files = {}) {
   made.push(db);
   sql('postgres', `CREATE DATABASE ${db} TEMPLATE ${BOOT_DB};`);
   sql(db, setupSql);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-rls-'));
+  const dir = tmpDir('qa-rls-');
   spawnSync('git', ['init', '-q'], { cwd: dir });
   const cfg = { gates: [], rls: { sql: [PSQL, url(db), '-X', '-A', '-t', '-v', 'ON_ERROR_STOP=1'], ...rls } };
   const all = { '.qa-ai-os.json': JSON.stringify(cfg), ...files };
@@ -372,7 +373,7 @@ CREATE SCHEMA graphql_public; CREATE TABLE graphql_public.gleak (id int); GRANT 
 });
 
 test('with no "sql", the command is docker exec into supabase_db_<project_id>', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-rls-'));
+  const dir = tmpDir('qa-rls-');
   spawnSync('git', ['init', '-q'], { cwd: dir });
   fs.writeFileSync(path.join(dir, '.qa-ai-os.json'), JSON.stringify({ gates: [], rls: {} }));
   fs.mkdirSync(path.join(dir, 'supabase'));
@@ -384,7 +385,7 @@ test('with no "sql", the command is docker exec into supabase_db_<project_id>', 
 });
 
 test('no "rls" section, or no way to find the database, is exit 2', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-rls-'));
+  const dir = tmpDir('qa-rls-');
   spawnSync('git', ['init', '-q'], { cwd: dir });
   fs.writeFileSync(path.join(dir, '.qa-ai-os.json'), JSON.stringify({ gates: [] }));
   assert.match(run(dir).out, /no "rls" section/);
@@ -405,7 +406,7 @@ function pasted(setupSql, args = []) {
   made.push(db);
   sql('postgres', `CREATE DATABASE ${db} TEMPLATE ${BOOT_DB};`);
   sql(db, setupSql);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-rls-'));
+  const dir = tmpDir('qa-rls-');
   const q = runArgs(dir, ['--print-query', ...args]);
   assert.strictEqual(q.status, 0, q.out);
   return { dir, cell: sql(db, q.out).trim() };
@@ -516,7 +517,7 @@ pgTest('free check: a result edited or cut short after the query ran fails its s
 });
 
 test('free check: a file that is not the result, or is missing a part, is exit 2', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-rls-'));
+  const dir = tmpDir('qa-rls-');
   fs.writeFileSync(path.join(dir, 'junk.txt'), 'Success. No rows returned');
   let r = runArgs(dir, ['--catalog', 'junk.txt']);
   assert.strictEqual(r.status, 2, r.out);

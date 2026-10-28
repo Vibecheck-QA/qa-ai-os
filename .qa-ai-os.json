@@ -1,6 +1,7 @@
 {
   "gates": [
-    { "name": "tests", "run": "npm test", "timeoutSeconds": 240, "minTests": 120 },
+    { "name": "tests", "run": "npm run test:coverage", "timeoutSeconds": 300, "minTests": 120,
+      "changedLines": { "lcov": "lcov.info", "include": ["scripts/", "stacks/nextjs/files/.github/qa-ai-os/"] } },
     { "name": "mutation (changed)", "run": "npm run mutate:changed", "timeoutSeconds": 300 }
   ],
   "allowDirty": false

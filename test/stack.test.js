@@ -7,6 +7,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
+const tmpDir = require('./tmp.js');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { plan, apply, atLeast } = require('../scripts/stack.js');
@@ -15,8 +16,7 @@ const FIXTURE = path.join(__dirname, 'fixtures', 'next-app');
 const SCRIPT = path.join(__dirname, '..', 'scripts', 'stack.js');
 
 function app(t, edit) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-stack-unit-'));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const dir = tmpDir('qa-stack-unit-');
   fs.cpSync(FIXTURE, dir, { recursive: true });
   if (edit) edit(dir);
   return dir;
@@ -116,8 +116,7 @@ test('not a Next.js app, or no package.json: the generic path', (t) => {
   const dir = app(t, (d) => pkgEdit(d, (p) => { delete p.dependencies.next; }));
   assert.strictEqual(plan(dir).stack, null);
   assert.match(plan(dir).reason, /no "next" dependency/);
-  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-stack-unit-'));
-  t.after(() => fs.rmSync(empty, { recursive: true, force: true }));
+  const empty = tmpDir('qa-stack-unit-');
   assert.strictEqual(plan(empty).stack, null);
   assert.strictEqual(apply(empty).stack, null);
 });
