@@ -12,7 +12,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
 const FIXTURE = path.join(__dirname, 'fixtures', 'next-app');
@@ -29,8 +29,8 @@ const step = (msg) => console.log(`\n== ${msg}`);
 const ENV = { ...process.env, FORCE_COLOR: '1' };
 const plain = (s) => (s || '').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
 
-function sh(cmd, { cwd = app, ok = true } = {}) {
-  const r = spawnSync(cmd, { cwd, shell: true, encoding: 'utf8', env: ENV, maxBuffer: 64 * 1024 * 1024 });
+function sh(cmd, { cwd = app, ok = true, env = {} } = {}) {
+  const r = spawnSync(cmd, { cwd, shell: true, encoding: 'utf8', env: { ...ENV, ...env }, maxBuffer: 64 * 1024 * 1024 });
   if (ok && r.status !== 0) {
     console.log(r.stdout, r.stderr);
     throw new Error(`failed (exit ${r.status}): ${cmd}`);
@@ -99,6 +99,25 @@ try {
   assert.deepStrictEqual(g.tests.tests, { runner: 'vitest', passed: 3, failed: 0, skipped: 0 });
   assert.deepStrictEqual(g.tests.changedLines, { base: 'origin/main', covered: 0, total: 0, min: 100 });
   assert.strictEqual(g.smoke.tests.passed, 1);
+
+  step('PROD: the smoke test against a live URL (no webServer), up and down');
+  // The production workflow sets PLAYWRIGHT_BASE_URL; Playwright must then test
+  // that site and start nothing. The PASS run above left a build in .next.
+  const server = spawn('npm run start -- -p 3300', { cwd: app, shell: true, detached: true, stdio: 'ignore', env: ENV });
+  try {
+    let up = false;
+    for (let i = 0; i < 60 && !up; i++) {
+      up = sh('node -e "fetch(\'http://localhost:3300\').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"', { ok: false }).status === 0;
+      if (!up) spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},1000)']);
+    }
+    assert.ok(up, 'next start came up on :3300');
+    const live = sh('npm run test:smoke', { env: { PLAYWRIGHT_BASE_URL: 'http://localhost:3300/' } });
+    assert.match(live.stdout, /1 passed/);
+    const down = sh('npm run test:smoke', { ok: false, env: { PLAYWRIGHT_BASE_URL: 'http://localhost:3399' } });
+    assert.notStrictEqual(down.status, 0, 'a site that is down fails the smoke test');
+  } finally {
+    try { process.kill(-server.pid, 'SIGKILL'); } catch { server.kill('SIGKILL'); }
+  }
 
   step('BLOCK: new code no test runs');
   write('lib/price.ts', `${read('lib/price.ts')}\nexport function discount(sum: number, code: string): number {\n  if (code === 'HALF') return sum / 2;\n  return sum;\n}\n`);

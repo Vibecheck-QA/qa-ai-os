@@ -1,6 +1,6 @@
 {
   "name": "qa-ai-os",
-  "version": "0.12.1",
+  "version": "0.13.0",
   "description": "Quality gates and critical thinking across the whole software lifecycle, idea to sunset or sale: technical and business. Runs your real test tools and judges their real results.",
   "author": { "name": "Vibecheck QA" },
   "repository": "https://github.com/Vibecheck-QA/vibecheck",

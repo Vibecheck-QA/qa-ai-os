@@ -70,6 +70,8 @@ function plan(dir) {
   for (const [name, layer] of Object.entries(stack.layers)) {
     const have = layer.existing.find((d) => deps[d]);
     if (have) { out.layers[name] = `keep: ${have}`; continue; }
+    // The production check runs our @smoke test: no point without our e2e layer.
+    if (layer.requires && out.layers[layer.requires] !== 'add') { out.layers[name] = `skip: needs ${layer.requires}`; continue; }
     out.layers[name] = 'add';
     Object.assign(installs, layer.devDependencies);
     for (const f of layer.files) (fs.existsSync(path.join(dir, f)) ? out.files.keep : out.files.add).push(f);

@@ -33,6 +33,14 @@
       "scripts": { "typecheck": "tsc --noEmit" },
       "gitignore": []
     },
+    "prod": {
+      "requires": "e2e",
+      "existing": [],
+      "devDependencies": {},
+      "files": [".github/workflows/qa-ai-os-prod.yml", ".github/qa-ai-os/prod-alert.mjs"],
+      "scripts": {},
+      "gitignore": []
+    },
     "ci": {
       "existing": [],
       "devDependencies": {},

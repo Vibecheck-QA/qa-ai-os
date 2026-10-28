@@ -31,9 +31,10 @@ const pkgEdit = (dir, fn) => {
 test('plan: a bare Next.js app gets every layer', (t) => {
   const p = plan(app(t));
   assert.strictEqual(p.stack, 'nextjs');
-  assert.deepStrictEqual(p.layers, { unit: 'add', e2e: 'add', types: 'add', ci: 'add' });
+  assert.deepStrictEqual(p.layers, { unit: 'add', e2e: 'add', types: 'add', prod: 'add', ci: 'add' });
   assert.deepStrictEqual(p.files, {
-    add: ['vitest.config.mts', 'vitest.setup.ts', 'playwright.config.ts', 'e2e/smoke.spec.ts', '.github/workflows/qa-ai-os.yml'],
+    add: ['vitest.config.mts', 'vitest.setup.ts', 'playwright.config.ts', 'e2e/smoke.spec.ts',
+      '.github/workflows/qa-ai-os-prod.yml', '.github/qa-ai-os/prod-alert.mjs', '.github/workflows/qa-ai-os.yml'],
     keep: [],
   });
   assert.deepStrictEqual(p.coverageInclude, ['lib', 'components']);
@@ -98,7 +99,7 @@ test('a script you already have is kept; a different command is reported', (t) =
 test('a layer whose tool you already use is left whole', (t) => {
   const dir = app(t, (d) => pkgEdit(d, (p) => { p.devDependencies.jest = '^29.0.0'; p.devDependencies.cypress = '^13.0.0'; }));
   const out = plan(dir);
-  assert.deepStrictEqual(out.layers, { unit: 'keep: jest', e2e: 'keep: cypress', types: 'add', ci: 'add' });
+  assert.deepStrictEqual(out.layers, { unit: 'keep: jest', e2e: 'keep: cypress', types: 'add', prod: 'skip: needs e2e', ci: 'add' });
   assert.strictEqual(out.install, null);
   assert.deepStrictEqual(out.files.add, ['.github/workflows/qa-ai-os.yml']);
   assert.deepStrictEqual(out.gates.map((g) => g.name), ['types']);

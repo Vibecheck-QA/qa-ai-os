@@ -20,7 +20,7 @@ Scripts run before any AI, the cheap model does the routing, a pass is never
 re-earned, and a check that never catches anything gets cut. See
 `rules/QUALITY.md` §0.
 
-## What's in v0.12
+## What's in v0.13
 
 | Piece | What it does |
 |---|---|
@@ -57,6 +57,7 @@ live $3.8k MRR Next.js app runs on, with stricter defaults:
 | **Playwright** (end to end) | A `@smoke` test runs on every push. Playwright builds and starts the app itself. In CI a failing test is retried once for its trace, but a test that only passes on retry still fails: flaky is a bug. |
 | **`tsc --noEmit`** | A push gate. |
 | **CI workflow** | Every check on every pull request. No "docs-only" or "migration-only" skip: a skipped check is how a broken build ships green. |
+| **Production check** | The `@smoke` test against your live site every 6 hours and after every successful production deploy. A failure opens **one** GitHub issue (comments on it while the outage lasts, emails the repo's watchers); passing again closes it. No URL set counts as a failure, never a skip. Set the repository variable `QA_PROD_URL`. |
 
 What `init` adds to the push gate:
 

@@ -22,6 +22,7 @@ const TARGETS = {
   'scripts/test-counts.js': 'test/test-counts.test.js',
   'scripts/diff-coverage.js': 'test/diff-coverage.test.js',
   'scripts/stack.js': 'test/stack.test.js',
+  'stacks/nextjs/files/.github/qa-ai-os/prod-alert.mjs': 'test/prod-alert.test.js',
 };
 
 // Lanes run side by side; within a lane, one mutant at a time. Scripts that load
@@ -33,6 +34,7 @@ const LANES = [
   ['scripts/design-check.js'],
   ['scripts/rls-check.js'],
   ['scripts/stack.js'],
+  ['stacks/nextjs/files/.github/qa-ai-os/prod-alert.mjs'],
 ];
 for (const f of Object.keys(TARGETS)) {
   if (LANES.flat().filter((x) => x === f).length !== 1) throw new Error(`${f} must be in exactly one lane`);
@@ -220,10 +222,22 @@ const STACK = [
   { name: 'the coverage list is never filled in', find: "text = text.replace('__COVERAGE_INCLUDE__',", replace: "text = text.replace('__NOTHING__'," },
   { name: 'changedLines with no source folders', find: '...(dirs.length ? { changedLines:', replace: '...(true ? { changedLines:' },
   { name: 'a Node version at the floor is too old', find: '  return true;\n}\n\n// The source folders', replace: '  return false;\n}\n\n// The source folders' },
+  { name: 'the production check without our e2e layer', find: "if (layer.requires && out.layers[layer.requires] !== 'add') {", replace: 'if (false) {' },
   { name: 'a non-Next app gets the stack', find: "if (!deps[stack.detect]) return", replace: 'if (false) return' },
 ];
 
+const PROD_ALERT = [
+  { name: 'every failure opens a new issue', find: "  if (issue) {\n    gh('issue', 'comment', issue, '--body', `Still failing", replace: "  if (false) {\n    gh('issue', 'comment', issue, '--body', `Still failing" },
+  { name: 'recovery never closes the issue', find: "  gh('issue', 'close', issue);\n", replace: '' },
+  { name: 'any open issue counts, label or not', find: "'issue', 'list', '--label', LABEL, '--state', 'open'", replace: "'issue', 'list', '--state', 'open'" },
+  { name: 'GitHub refusing is ignored', find: "    process.exit(1);\n  }\n  return r.stdout.trim();", replace: "  }\n  return r.stdout.trim();" },
+  { name: 'an unknown result counts as passing', find: "if (result !== 'success' && result !== 'failure') {", replace: 'if (false) {' },
+  { name: 'a missing URL reads like a failed page', find: "const what = url ? `The smoke test against ${url} failed.` :", replace: 'const what = true ? `The smoke test against ${url} failed.` :' },
+  { name: 'the issue has no run link', find: '\\nRun (trace, screenshots, video): ${run}', replace: '' },
+];
+
 const MUTANTS = [
+  ...PROD_ALERT.map((m) => ({ ...m, file: 'stacks/nextjs/files/.github/qa-ai-os/prod-alert.mjs' })),
   ...STACK.map((m) => ({ ...m, file: 'scripts/stack.js' })),
   ...PUSH_GATE.map((m) => ({ ...m, file: 'scripts/push-gate.js' })),
   ...DESIGN.map((m) => ({ ...m, file: 'scripts/design-check.js' })),
