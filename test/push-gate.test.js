@@ -87,6 +87,15 @@ test('failing gate: push blocked with gate name and output tail', () => {
   assert.match(r.stderr, /boom: 3 tests failed/);
 });
 
+test('colour codes are stripped from the output the agent sees', () => {
+  const { dir } = makeRepo({ gates: [{ name: 'types', run: 'node color.js' }] });
+  fs.writeFileSync(path.join(dir, 'color.js'), "console.log('\\x1b[96mlib/price.ts\\x1b[0m:\\x1b[93m4\\x1b[0m - \\x1b[91merror\\x1b[0m TS2322'); process.exit(1);\n");
+  const r = runHook('git push', dir, dataDir());
+  assert.strictEqual(r.status, 2);
+  assert.match(r.stderr, /lib\/price\.ts:4 - error TS2322/);
+  assert.ok(!r.stderr.includes('\x1b'), 'no escape codes');
+});
+
 test('bug #4: a chained "tests | grep && push" is still blocked when tests fail', () => {
   const { dir } = makeRepo({ gates: [{ name: 'tests', run: FAIL }] });
   const r = runHook('npm test 2>&1 | grep FAIL && git push', dir, dataDir());

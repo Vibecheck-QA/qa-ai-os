@@ -6,10 +6,18 @@ Thanks for helping. QA AI OS holds itself to the contract it ships
 ## Setup
 
 ```
-npm test          # behaviour tests: drive the real scripts against real git repos
-npm run mutate    # every guard in every script must have a killed mutant
-npm run validate  # claude plugin validate ./
+npm test                # behaviour tests: drive the real scripts against real git repos
+npm run mutate:changed  # mutants that break a line you changed (~1 min)
+npm run mutate          # every mutant (~6 min; CI runs this)
+npm run test:stack      # the Next.js stack on a fresh app (slow; CI job "stack")
+npm run validate        # claude plugin validate ./
 ```
+
+**This repo gates its own pushes.** Open Claude Code in this repo and
+`.claude/settings.json` runs this checkout's `scripts/push-gate.js` on every
+`git push`: `npm test` (at least 120 passing) and `npm run mutate:changed` must
+pass first, the same gates a user's repo gets. If you also installed the
+plugin, the gates run twice; that's safe, just slower.
 
 The RLS tests start a throwaway Postgres: they need `initdb` and `psql` on your
 PATH (or `QA_PG_BIN` pointing at them). `QA_SKIP_PG=1` skips them, loudly; a
