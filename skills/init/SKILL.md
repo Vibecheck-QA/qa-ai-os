@@ -40,6 +40,13 @@ runs on, with stricter defaults:
   fails (flaky is a bug).
 - **A CI workflow** that runs every check on every pull request, with no
   "docs-only" skip.
+- **A production check** (`.github/workflows/qa-ai-os-prod.yml`): the smoke
+  test against the live site every 6 hours and after each successful
+  production deploy. A failure opens one GitHub issue; recovery closes it. It
+  needs the repository variable `QA_PROD_URL` (Settings → Secrets and
+  variables → Actions → Variables): tell them to set it, and that until they do
+  the check fails on purpose. Offer to trigger it once (`gh workflow run "QA AI
+  OS production check"`) after they set it, and show the result.
 
 Show the plan in plain English: the files it adds, the scripts, the install
 command, and every `layers` entry that says `keep: <tool>` (a tool they

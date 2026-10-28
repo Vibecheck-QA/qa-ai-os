@@ -1,0 +1,76 @@
+# QA AI OS: the smoke test against your live site, on a schedule and after
+# every successful production deploy. A failure opens ONE issue (it emails the
+# repo's watchers); passing again closes it.
+#
+# Setup: Settings -> Secrets and variables -> Actions -> Variables ->
+# QA_PROD_URL = https://your-app.com. Not set = a failure, never a skip.
+name: QA AI OS production check
+
+on:
+  schedule:
+    - cron: '17 */6 * * *' # every 6 hours, off the hour (top-of-hour runs queue)
+  deployment_status:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: qa-ai-os-prod
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    # Deploy events: only a successful production deploy (Vercel and Netlify
+    # report these; `==` ignores case, so "Production" and "production" both
+    # match). Preview deploys are checked by the PR workflow.
+    if: >-
+      github.event_name != 'deployment_status' ||
+      (github.event.deployment_status.state == 'success' &&
+       github.event.deployment.environment == 'Production')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PLAYWRIGHT_BASE_URL: ${{ vars.QA_PROD_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
+      - name: Install browser
+        timeout-minutes: 5
+        run: npx playwright install chromium
+      - name: Smoke test against production
+        id: smoke
+        run: |
+          if [ -z "$PLAYWRIGHT_BASE_URL" ]; then
+            echo "::error::QA_PROD_URL is not set, so production was not checked."
+            exit 1
+          fi
+          npm run test:smoke
+      - name: Open or close the production issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QA_RESULT: ${{ steps.smoke.outcome == 'success' && 'success' || 'failure' }}
+          QA_PROD_URL: ${{ vars.QA_PROD_URL }}
+          QA_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node .github/qa-ai-os/prod-alert.mjs
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report-prod
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: ignore
