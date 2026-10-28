@@ -159,6 +159,7 @@ const COUNTS = [
   { name: 'mocha pending is not skipped', find: 'skipped: pend ? +pend[1] : 0', replace: 'skipped: 0' },
   { name: 'playwright failures are not counted', find: 'failed: fail ? +fail[1] : 0, skipped: skip ? +skip[1] : 0 };\n  }],\n];', replace: 'failed: 0, skipped: skip ? +skip[1] : 0 };\n  }],\n];' },
   { name: 'node todo is not skipped', find: "skipped: (skip ? +skip[1] : 0) + (todo ? +todo[1] : 0) };\n  }],\n  // node --test (spec)", replace: "skipped: (skip ? +skip[1] : 0) };\n  }],\n  // node --test (spec)" },
+  { name: 'node spec todo is not skipped', find: "skipped: (skip ? +skip[1] : 0) + (todo ? +todo[1] : 0) };\n  }],\n  // vitest", replace: "skipped: (skip ? +skip[1] : 0) };\n  }],\n  // vitest" },
 ];
 
 const MUTANTS = [

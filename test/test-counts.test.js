@@ -42,6 +42,11 @@ test('the last summary wins when a run prints more than one', () => {
   assert.deepStrictEqual(testCounts(twice), { runner: 'node', ...SUITE });
 });
 
+test('node: todo tests count as skipped (TAP and spec)', () => {
+  assert.deepStrictEqual(testCounts(out('node').replace('# todo 0', '# todo 2')), { runner: 'node', ...SUITE, skipped: 3 });
+  assert.deepStrictEqual(testCounts(out('node-spec').replace('ℹ todo 0', 'ℹ todo 2')), { runner: 'node', ...SUITE, skipped: 3 });
+});
+
 test('vitest: "Test Files" is not the test count', () => {
   const files = ' Test Files  3 passed (3)\n      Tests  12 passed (12)\n';
   assert.deepStrictEqual(testCounts(files), { runner: 'vitest', passed: 12, failed: 0, skipped: 0 });
