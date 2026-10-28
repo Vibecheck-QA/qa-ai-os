@@ -20,6 +20,7 @@ const TARGETS = {
   'scripts/rls-check.js': 'test/rls-check.test.js',
   'scripts/mutate.js': 'test/mutate-runner.test.js',
   'scripts/run-timed.js': 'test/mutate-runner.test.js',
+  'scripts/test-counts.js': 'test/test-counts.test.js',
 };
 
 const PUSH_GATE = [
@@ -45,6 +46,11 @@ const PUSH_GATE = [
   { name: 'the receipt never says dirty', find: 'dirty: Boolean(dirty),', replace: 'dirty: false,' },
   { name: 'an interrupted mutation run is not blocked', find: 'if (fs.existsSync(path.join(root, MUTATE_BACKUP))) {', replace: 'if (false) {' },
   { name: 'a gate with nothing to run is not refused', find: 'const unrunnable = gates.find((g) => !gateCommand(g));', replace: 'const unrunnable = null;' },
+  { name: 'minTests is ignored', find: 'if (gate.minTests !== undefined && counts.passed < gate.minTests) {', replace: 'if (false) {' },
+  { name: 'maxSkipped is ignored', find: 'if (gate.maxSkipped !== undefined && counts.skipped > gate.maxSkipped) {', replace: 'if (false) {' },
+  { name: 'no summary counts as a pass', find: "      if (!counts) {\n        return { allow: false, reason: `QA AI OS push gate: \"${name}\" exited 0", replace: "      if (!counts) { return { allow: true };\n        return { allow: false, reason: `QA AI OS push gate: \"${name}\" exited 0" },
+  { name: 'a bad limit is accepted', find: 'const isCount = (v) => v === undefined || (Number.isInteger(v) && v >= 0);', replace: 'const isCount = () => true;' },
+  { name: 'counts never reach the receipt', find: '...(counts ? { tests: counts } : {}), ', replace: '' },
   { name: 'a receipt that cannot be written still allows the push', find: '  } catch (err) {\n    return {\n      allow: false,', replace: '  } catch (err) {\n    return { allow: true };\n    return {\n      allow: false,' },
 ];
 
@@ -142,11 +148,26 @@ const MUTATE = [
   { name: 'restore by reversing the edit', find: 'fs.writeFileSync(target, original); // from the byte copy', replace: "fs.writeFileSync(target, fs.readFileSync(target, 'utf8').replace(replace, find)); // from the byte copy" },
 ];
 
+const COUNTS = [
+  { name: 'the first summary wins', find: 'for (const x of text.matchAll(re)) m = x;', replace: 'for (const x of text.matchAll(re)) { m = x; break; }' },
+  { name: 'colour codes are kept', find: "String(output || '').replace(ANSI, '')", replace: "String(output || '')" },
+  { name: 'failed is not counted', find: "else if (word === 'failed' || word === 'errors' || word === 'error') out.failed += Number(n);", replace: '' },
+  { name: 'skipped is not counted', find: "else if (word === 'skipped' || word === 'todo' || word === 'pending' || word === 'xfailed' || word === 'deselected') out.skipped += Number(n);", replace: '' },
+  { name: 'vitest reads "Test Files" as tests', find: String.raw`/^\s*Tests\s{2,}(.+?)\s+\(\d+\)\s*$/gm`, replace: String.raw`/^\s*Test(?: Files)?\s{2,}(.+?)\s+\(\d+\)\s*$/gm` },
+  { name: '"no test files found" is unknown', find: "return /^No test files found/m.test(t) ? { passed: 0, failed: 0, skipped: 0 } : null;", replace: 'return null;' },
+  { name: 'pytest "no tests ran" is unknown', find: String.raw`return /^=*\s*no tests ran in [\d.]+s/m.test(t) ? { passed: 0, failed: 0, skipped: 0 } : null;`, replace: 'return null;' },
+  { name: 'mocha pending is not skipped', find: 'skipped: pend ? +pend[1] : 0', replace: 'skipped: 0' },
+  { name: 'playwright failures are not counted', find: 'failed: fail ? +fail[1] : 0, skipped: skip ? +skip[1] : 0 };\n  }],\n];', replace: 'failed: 0, skipped: skip ? +skip[1] : 0 };\n  }],\n];' },
+  { name: 'node todo is not skipped', find: "skipped: (skip ? +skip[1] : 0) + (todo ? +todo[1] : 0) };\n  }],\n  // node --test (spec)", replace: "skipped: (skip ? +skip[1] : 0) };\n  }],\n  // node --test (spec)" },
+  { name: 'node spec todo is not skipped', find: "skipped: (skip ? +skip[1] : 0) + (todo ? +todo[1] : 0) };\n  }],\n  // vitest", replace: "skipped: (skip ? +skip[1] : 0) };\n  }],\n  // vitest" },
+];
+
 const MUTANTS = [
   ...PUSH_GATE.map((m) => ({ ...m, file: 'scripts/push-gate.js' })),
   ...DESIGN.map((m) => ({ ...m, file: 'scripts/design-check.js' })),
   ...RLS.map((m) => ({ ...m, file: 'scripts/rls-check.js' })),
   ...MUTATE.map((m) => ({ ...m, file: 'scripts/mutate.js' })),
+  ...COUNTS.map((m) => ({ ...m, file: 'scripts/test-counts.js' })),
   { file: 'scripts/run-timed.js', name: 'a timeout kills only the shell', find: "if (win) spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });\n    else { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* already gone */ } }", replace: 'child.kill();' },
 ];
 

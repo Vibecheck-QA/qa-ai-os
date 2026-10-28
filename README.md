@@ -20,7 +20,7 @@ Scripts run before any AI, the cheap model does the routing, a pass is never
 re-earned, and a check that never catches anything gets cut. See
 `rules/QUALITY.md` §0.
 
-## What's in v0.9
+## What's in v0.10
 
 | Piece | What it does |
 |---|---|
@@ -143,7 +143,8 @@ schemas: add `--schemas public,api` to both commands.
 
 "Done" should come with receipts. Every push the gate lets through writes
 `.qa-ai-os/receipts/<commit>.json`: what ran, on which commit, the exit code,
-how long it took, and the last 25 lines of output. From the walkthrough above,
+how long it took, how many tests passed and were skipped (when the runner
+prints a summary), and the last 25 lines of output. From the walkthrough above,
 after the fix:
 
 ```json
@@ -240,7 +241,7 @@ Run it by hand from your repo root with `node <plugin>/scripts/mutate.js`.
 {
   "gates": [
     { "name": "types", "run": "npx tsc --noEmit", "timeoutSeconds": 120 },
-    { "name": "tests", "run": "npm run test:ci", "timeoutSeconds": 300 }
+    { "name": "tests", "run": "npm run test:ci", "timeoutSeconds": 300, "minTests": 850, "maxSkipped": 0 }
   ],
   "allowDirty": false,
   "roles": {
@@ -255,6 +256,17 @@ Run it by hand from your repo root with `node <plugin>/scripts/mutate.js`.
 should be a different model family than the builder; with only one AI, set
 `"reviewer": { "tool": "fresh-session" }` and the kit will say the review is
 weaker. The push gate only reads `gates`.
+
+**`minTests` / `maxSkipped`:** an exit code can't tell "850 tests passed" from
+"0 ran" or "18 files silently skipped". With either limit set, the gate reads
+the runner's own summary line (node, Vitest, Jest, Mocha, pytest, Playwright)
+and blocks the push when fewer than `minTests` passed, when more than
+`maxSkipped` were skipped, or when it can't find a summary at all: unknown is
+never a pass. Counts land in the receipt either way:
+
+```json
+"tests": { "runner": "vitest", "passed": 852, "failed": 0, "skipped": 0 }
+```
 
 ## Developing
 

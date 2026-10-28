@@ -24,6 +24,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 const { TIMEOUT_MARK } = require('./run-timed.js');
+const { testCounts } = require('./test-counts.js');
 
 const CONFIG_FILE = '.qa-ai-os.json';
 const OUTPUT_TAIL_LINES = 25;
@@ -122,6 +123,11 @@ function evaluate({ command, cwd, dataDir }) {
     };
   }
 
+  const isCount = (v) => v === undefined || (Number.isInteger(v) && v >= 0);
+  const badLimit = gates.find((g) => g && (!isCount(g.minTests) || !isCount(g.maxSkipped)));
+  if (badLimit) {
+    return { allow: false, reason: `QA AI OS push gate: gate ${JSON.stringify(badLimit)}: "minTests" and "maxSkipped" must be whole numbers, 0 or more. Push blocked.` };
+  }
   const unrunnable = gates.find((g) => !gateCommand(g));
   if (unrunnable) {
     return { allow: false, reason: `QA AI OS push gate: gate ${JSON.stringify(unrunnable)} has no "run" command or a known "builtin" (${Object.keys(BUILTINS).join(', ')}). Push blocked.` };
@@ -157,7 +163,8 @@ function evaluate({ command, cwd, dataDir }) {
       { cwd: root, encoding: 'utf8', timeout: timeoutMs + 30000 });
     const output = `${r.stdout || ''}\n${r.stderr || ''}`;
     const timedOut = (r.status === 124 && (r.stderr || '').includes(TIMEOUT_MARK)) || Boolean(r.error && r.error.code === 'ETIMEDOUT');
-    ran.push({ name, run: gate.builtin ? `builtin:${gate.builtin}` : gate.run, exit: r.status, ms: Date.now() - started, output: tail(output, OUTPUT_TAIL_LINES) });
+    const counts = testCounts(output);
+    ran.push({ name, run: gate.builtin ? `builtin:${gate.builtin}` : gate.run, exit: r.status, ms: Date.now() - started, ...(counts ? { tests: counts } : {}), output: tail(output, OUTPUT_TAIL_LINES) });
     if (timedOut) {
       return { allow: false, reason: `QA AI OS push gate: "${name}" timed out after ${timeoutMs / 1000}s. Push blocked.` };
     }
@@ -168,6 +175,18 @@ function evaluate({ command, cwd, dataDir }) {
           `QA AI OS push gate: "${name}" failed (exit ${r.status}). Push blocked.\n` +
           `Command: ${gate.builtin ? `builtin:${gate.builtin}` : gate.run}\nLast ${OUTPUT_TAIL_LINES} lines:\n${tail(output, OUTPUT_TAIL_LINES)}`,
       };
+    }
+    // Exit 0 can't tell "12 passed" from "0 ran" or "18 files skipped": the summary can.
+    if (gate.minTests !== undefined || gate.maxSkipped !== undefined) {
+      if (!counts) {
+        return { allow: false, reason: `QA AI OS push gate: "${name}" exited 0, but its output has no test summary QA AI OS can read, so "minTests"/"maxSkipped" can't be checked. Push blocked: unknown is never a pass.` };
+      }
+      if (gate.minTests !== undefined && counts.passed < gate.minTests) {
+        return { allow: false, reason: `QA AI OS push gate: "${name}" exited 0 with only ${counts.passed} passing tests (minimum ${gate.minTests}). Tests that didn't run didn't pass. Push blocked.` };
+      }
+      if (gate.maxSkipped !== undefined && counts.skipped > gate.maxSkipped) {
+        return { allow: false, reason: `QA AI OS push gate: "${name}" skipped ${counts.skipped} tests (allowed ${gate.maxSkipped}). Push blocked.` };
+      }
     }
   }
 

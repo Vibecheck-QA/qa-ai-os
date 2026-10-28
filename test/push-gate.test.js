@@ -273,6 +273,55 @@ test('a gate that hangs is killed with everything it started, and the push is bl
   }
 });
 
+// A gate that prints a node:test-style summary and exits 0.
+const summary = (pass, skipped) => `node -e "console.log('# tests ${pass + skipped}\\n# pass ${pass}\\n# fail 0\\n# skipped ${skipped}')"`;
+
+test('minTests: a gate that exits 0 with too few passing tests blocks the push', () => {
+  const { dir } = makeRepo({ gates: [{ name: 'tests', run: summary(0, 0), minTests: 1 }] });
+  const r = runHook('git push', dir, dataDir());
+  assert.strictEqual(r.status, 2);
+  assert.match(r.stderr, /only 0 passing tests \(minimum 1\)/);
+});
+
+test('minTests met: allowed, and the receipt records the counts', () => {
+  const { dir, g } = makeRepo({ gates: [{ name: 'tests', run: summary(5, 0), minTests: 5 }] });
+  assert.strictEqual(runHook('git push', dir, dataDir()).status, 0);
+  const receipt = JSON.parse(fs.readFileSync(receiptOf(dir, g).file, 'utf8'));
+  assert.deepStrictEqual(receipt.gates[0].tests, { runner: 'node', passed: 5, failed: 0, skipped: 0 });
+});
+
+test('maxSkipped: more skipped tests than allowed blocks the push', () => {
+  const { dir } = makeRepo({ gates: [{ name: 'tests', run: summary(5, 2), maxSkipped: 1 }] });
+  const r = runHook('git push', dir, dataDir());
+  assert.strictEqual(r.status, 2);
+  assert.match(r.stderr, /skipped 2 tests \(allowed 1\)/);
+  const ok = makeRepo({ gates: [{ name: 'tests', run: summary(5, 1), maxSkipped: 1 }] });
+  assert.strictEqual(runHook('git push', ok.dir, dataDir()).status, 0);
+});
+
+test('a limit with no readable test summary blocks: unknown is never a pass', () => {
+  const { dir } = makeRepo({ gates: [{ name: 'tests', run: PASS, minTests: 1 }] });
+  const r = runHook('git push', dir, dataDir());
+  assert.strictEqual(r.status, 2);
+  assert.match(r.stderr, /no test summary/);
+});
+
+test('no limits: a gate without a summary still passes, and its receipt has no counts', () => {
+  const { dir, g } = makeRepo({ gates: [{ name: 'types', run: PASS }] });
+  assert.strictEqual(runHook('git push', dir, dataDir()).status, 0);
+  const receipt = JSON.parse(fs.readFileSync(receiptOf(dir, g).file, 'utf8'));
+  assert.strictEqual('tests' in receipt.gates[0], false);
+});
+
+test('a limit that is not a whole number of 0 or more blocks the push', () => {
+  for (const bad of [{ minTests: -1 }, { minTests: 1.5 }, { maxSkipped: '0' }]) {
+    const { dir } = makeRepo({ gates: [{ name: 'tests', run: summary(5, 0), ...bad }] });
+    const r = runHook('git push', dir, dataDir());
+    assert.strictEqual(r.status, 2, JSON.stringify(bad));
+    assert.match(r.stderr, /must be whole numbers/);
+  }
+});
+
 test('an interrupted mutation run blocks the push until it is put back', () => {
   const { dir } = makeRepo({ gates: [{ name: 'tests', run: PASS }] });
   fs.mkdirSync(path.join(dir, '.qa-ai-os', 'mutate-backup'), { recursive: true }); // untracked
