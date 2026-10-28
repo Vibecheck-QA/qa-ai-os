@@ -1,7 +1,7 @@
 {
   "gates": [
-    { "name": "tests", "run": "npm test", "timeoutSeconds": 180 },
-    { "name": "mutation", "run": "npm run mutate", "timeoutSeconds": 420 }
+    { "name": "tests", "run": "npm test", "timeoutSeconds": 240, "minTests": 120 },
+    { "name": "mutation (changed)", "run": "npm run mutate:changed", "timeoutSeconds": 300 }
   ],
   "allowDirty": false
 }

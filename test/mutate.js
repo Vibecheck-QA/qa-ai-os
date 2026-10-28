@@ -65,6 +65,7 @@ const PUSH_GATE = [
   { name: 'maxSkipped is ignored', find: 'if (gate.maxSkipped !== undefined && counts.skipped > gate.maxSkipped) {', replace: 'if (false) {' },
   { name: 'no summary counts as a pass', find: "      if (!counts) {\n        return { allow: false, reason: `QA AI OS push gate: \"${name}\" exited 0", replace: "      if (!counts) { return { allow: true };\n        return { allow: false, reason: `QA AI OS push gate: \"${name}\" exited 0" },
   { name: 'a bad limit is accepted', find: 'const isCount = (v) => v === undefined || (Number.isInteger(v) && v >= 0);', replace: 'const isCount = () => true;' },
+  { name: 'colour codes reach the agent', find: String.raw`.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').replace(/\r\n/g, '\n').trimEnd()`, replace: String.raw`.replace(/\r\n/g, '\n').trimEnd()` },
   { name: 'counts never reach the receipt', find: '...(counts ? { tests: counts } : {}), ', replace: '' },
   { name: 'a receipt that cannot be written still allows the push', find: '  } catch (err) {\n    return {\n      allow: false,', replace: '  } catch (err) {\n    return { allow: true };\n    return {\n      allow: false,' },
 ];
@@ -237,22 +238,66 @@ const MUTANTS = [
 // While developing: QA_MUTATE_ONLY=scripts/stack.js checks one file's mutants.
 // The result line says so, so a partial run never reads as the full check.
 const ONLY = process.env.QA_MUTATE_ONLY;
+const suiteOf = (m) => m.suite || TARGETS[m.file];
+let scope = null; // null = every mutant
 if (ONLY) {
   if (!TARGETS[ONLY]) throw new Error(`QA_MUTATE_ONLY: ${ONLY} is not a target`);
   MUTANTS.splice(0, MUTANTS.length, ...MUTANTS.filter((m) => m.file === ONLY));
+  scope = `${ONLY} only`;
 }
+
+// --changed (this repo's push gate): only the mutants that break a line this
+// branch changed since origin/main, plus mutants that are new or edited. Picking
+// by whole file ran 33 mutants in 10 minutes for a 3-line change; by line, a
+// push gets its mutation check in about a minute. CI still runs every mutant.
+// No origin/main to compare with: check them all (unknown never narrows).
+if (process.argv.includes('--changed')) {
+  const { addedLines } = require('../scripts/diff-coverage.js');
+  const base = spawnSync('git', ['merge-base', 'origin/main', 'HEAD'], { cwd: ROOT, encoding: 'utf8' });
+  const diff = base.status === 0 ? spawnSync('git', ['-c', 'core.quotePath=false', 'diff', '-U0', '--no-color', '--no-ext-diff',
+    '--src-prefix=a/', '--dst-prefix=b/', base.stdout.trim()], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }) : null;
+  if (!diff || diff.status !== 0) {
+    console.log('--changed: no origin/main to compare with, so checking every mutant.');
+  } else {
+    const added = addedLines(diff.stdout);
+    const touched = (file, from, to) => (added.get(file) || []).some(({ line }) => line >= from && line <= to);
+    const lineOf = (text, index) => text.slice(0, index).split('\n').length;
+    const self = fs.readFileSync(__filename, 'utf8').replace(/\r\n/g, '\n');
+    const sources = {};
+    const picked = MUTANTS.filter((m) => {
+      const src = (sources[m.file] ??= fs.readFileSync(path.join(ROOT, m.file), 'utf8').replace(/\r\n/g, '\n'));
+      const at = src.indexOf(m.find);
+      if (at < 0) return true; // a mutant that no longer applies must be reported, never dropped
+      const from = lineOf(src, at);
+      if (touched(m.file, from, from + m.find.split('\n').length - 1)) return true;
+      const decl = self.indexOf(m.name); // a new or edited mutant
+      return decl >= 0 && touched('test/mutate.js', lineOf(self, decl), lineOf(self, decl));
+    });
+    MUTANTS.splice(0, MUTANTS.length, ...picked);
+    scope = 'lines changed since origin/main';
+    if (MUTANTS.length === 0) {
+      console.log('No mutant breaks a line this branch changed (CI runs them all).');
+      process.exit(0);
+    }
+    console.log(`Checking ${MUTANTS.length} mutants on changed lines:\n${MUTANTS.map((m) => `  ${m.file}: ${m.name}`).join('\n')}\n`);
+  }
+}
+const SUITES = [...new Set(MUTANTS.map(suiteOf))];
 
 // One Postgres cluster for the whole run (~10 s each to start), shared with every
 // test process through QA_PG_PORT. Each test process still makes its own databases.
+// A narrowed run with no RLS mutants doesn't need one.
 const { findPgBin, startCluster, stopCluster } = require('./pg-cluster.js');
-const PG_BIN = process.env.QA_SKIP_PG === '1' ? null : findPgBin();
+const needPg = !scope || SUITES.includes(TARGETS['scripts/rls-check.js']);
+const PG_BIN = process.env.QA_SKIP_PG === '1' || !needPg ? null : findPgBin();
 const PG = PG_BIN && startCluster(PG_BIN);
 const ENV = PG ? { ...process.env, QA_PG_PORT: String(PG.port) } : process.env;
 process.on('exit', () => { if (PG) stopCluster(PG_BIN, PG.data); });
 
 const suiteArgs = (glob, only) => ['--test', ...(only ? [`--test-name-pattern=${only}`] : []), glob];
-const runSuite = (glob = 'test/*.test.js', only) =>
-  spawnSync(process.execPath, suiteArgs(glob, only), { cwd: ROOT, encoding: 'utf8', env: ENV });
+// Baseline: every suite, or (narrowed) just the suites the chosen mutants run.
+const runSuite = () => spawnSync(process.execPath, ['--test', ...(scope ? SUITES : ['test/*.test.js'])],
+  { cwd: ROOT, encoding: 'utf8', env: ENV });
 const runSuiteAsync = (glob, only) => new Promise((resolve) => {
   const child = spawn(process.execPath, suiteArgs(glob, only), { cwd: ROOT, env: ENV, stdio: 'ignore' });
   child.on('error', () => resolve(null));
@@ -313,8 +358,8 @@ main().then((survived) => {
     }
   }
   console.log(survived === 0 ? `
-All ${MUTANTS.length} mutants killed${ONLY ? ` (${ONLY} ONLY, not the full check)` : ''}.` : `
-${survived} of ${MUTANTS.length} mutants survived${ONLY ? ` (${ONLY} only)` : ''}.`);
+All ${MUTANTS.length} mutants killed${scope ? ` (${scope}; not the full check, CI runs that)` : ''}.` : `
+${survived} of ${MUTANTS.length} mutants survived${scope ? ` (${scope})` : ''}.`);
   process.exit(survived === 0 ? 0 : 1);
 }, (err) => {
   restoreAll();

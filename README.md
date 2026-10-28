@@ -370,8 +370,12 @@ npm test          # behaviour tests: drive the real scripts against real git rep
                   # (the RLS tests start a throwaway Postgres: needs initdb + psql,
                   #  or QA_PG_BIN; QA_SKIP_PG=1 skips them, loudly)
 npm run mutate    # every guard in every script must have a killed mutant
+npm run mutate:changed  # just the mutants on lines you changed (the push gate)
 npm run validate  # claude plugin validate ./
 ```
+
+This repo runs its own push gate on itself (`.claude/settings.json`,
+`.qa-ai-os.json`): see `CONTRIBUTING.md`.
 
 Edit rules in `rules/QUALITY.md`, then `npm run sync-agents`.
 

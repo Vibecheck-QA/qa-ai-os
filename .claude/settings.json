@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/push-gate.js\"",
+            "timeout": 600,
+            "statusMessage": "QA AI OS push gate (this repo's own copy)..."
+          }
+        ]
+      }
+    ]
+  }
+}

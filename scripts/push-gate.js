@@ -91,8 +91,9 @@ function git(args, cwd) {
   return r.stdout.trim();
 }
 
+// Colour codes would reach the agent and the receipt as `[96m` noise.
 function tail(text, n) {
-  const lines = (text || '').replace(/\r\n/g, '\n').trimEnd().split('\n');
+  const lines = (text || '').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').replace(/\r\n/g, '\n').trimEnd().split('\n');
   return lines.slice(-n).join('\n');
 }
 
