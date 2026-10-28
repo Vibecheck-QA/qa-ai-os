@@ -24,13 +24,18 @@ const work = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-stack-'));
 const app = path.join(work, 'app');
 const step = (msg) => console.log(`\n== ${msg}`);
 
+// Colour on everywhere, so a local run prints what CI prints; assertions read
+// the text with colour codes stripped.
+const ENV = { ...process.env, FORCE_COLOR: '1' };
+const plain = (s) => (s || '').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+
 function sh(cmd, { cwd = app, ok = true } = {}) {
-  const r = spawnSync(cmd, { cwd, shell: true, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const r = spawnSync(cmd, { cwd, shell: true, encoding: 'utf8', env: ENV, maxBuffer: 64 * 1024 * 1024 });
   if (ok && r.status !== 0) {
     console.log(r.stdout, r.stderr);
     throw new Error(`failed (exit ${r.status}): ${cmd}`);
   }
-  return r;
+  return { status: r.status, stdout: plain(r.stdout), stderr: plain(r.stderr) };
 }
 const write = (file, text) => {
   fs.mkdirSync(path.dirname(path.join(app, file)), { recursive: true });
@@ -40,9 +45,9 @@ const read = (file) => fs.readFileSync(path.join(app, file), 'utf8');
 
 function push() {
   const input = JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Bash', cwd: app, tool_input: { command: 'git push' } });
-  const r = spawnSync(process.execPath, [GATE], { input, encoding: 'utf8', env: { ...process.env, CLAUDE_PLUGIN_DATA: path.join(work, 'data') } });
+  const r = spawnSync(process.execPath, [GATE], { input, encoding: 'utf8', env: { ...ENV, CLAUDE_PLUGIN_DATA: path.join(work, 'data') } });
   console.log(`push gate: exit ${r.status}${r.stderr ? `\n${r.stderr.trim()}` : ''}`);
-  return r;
+  return { status: r.status, stderr: plain(r.stderr) };
 }
 const head = () => sh('git rev-parse HEAD').stdout.trim();
 const receipt = () => JSON.parse(read(`.qa-ai-os/receipts/${head()}.json`));
