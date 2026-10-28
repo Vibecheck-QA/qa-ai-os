@@ -37,6 +37,11 @@ const PUSH_GATE = [
   { name: 'ignore pushes chained after &&', find: "cmd.split(/\\|\\||&&|[;|\\n]/)", replace: "cmd.split(/[;\\n]/)" },
   { name: 'ignore git -C', find: "if (flag === '-C') {", replace: "if (false) {" },
   { name: 'treat --dry-run as a real push', find: "if (rest.includes('--dry-run') || ", replace: "if (" },
+  { name: 'a pass leaves no receipt', find: '    fs.renameSync(`${receiptFile}.tmp`, receiptFile);', replace: '' },
+  { name: 'a cached pass needs no receipt', find: 'if (cache[cacheKey] && receiptVouches(receiptFile, sha, configHash))', replace: 'if (cache[cacheKey])' },
+  { name: "another config's receipt vouches", find: ' && r.config === configHash', replace: '' },
+  { name: 'the receipt never says dirty', find: 'dirty: Boolean(dirty),', replace: 'dirty: false,' },
+  { name: 'a receipt that cannot be written still allows the push', find: '  } catch (err) {\n    return {\n      allow: false,', replace: '  } catch (err) {\n    return { allow: true };\n    return {\n      allow: false,' },
 ];
 
 const DESIGN = [
