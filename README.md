@@ -20,11 +20,11 @@ Scripts run before any AI, the cheap model does the routing, a pass is never
 re-earned, and a check that never catches anything gets cut. See
 `rules/QUALITY.md` §0.
 
-## What's in v0.10
+## What's in v0.11
 
 | Piece | What it does |
 |---|---|
-| **Push gate** (hook) | When an AI agent runs `git push`, re-runs your gates on the exact commit being pushed and blocks the push if any fails. Catches the classic `tests \| grep FAIL && git push` lie. Every pass leaves a [receipt](#receipts): the commit, each command, its exit code and output. Remembers a pass per commit; never remembers a failure. Fails closed. |
+| **Push gate** (hook) | When an AI agent runs `git push`, re-runs your gates on the exact commit being pushed and blocks the push if any fails. Catches the classic `tests \| grep FAIL && git push` lie. Can also require that the tests [ran the lines you changed](#did-the-tests-run-the-change). Every pass leaves a [receipt](#receipts): the commit, each command, its exit code and output. Remembers a pass per commit; never remembers a failure. Fails closed. |
 | `/qa-ai-os:init` | Detects your stack, proposes honest gate commands, proves they can pass *and* fail, and installs the quality contract into `AGENTS.md` so every AI agent (Claude, Codex, Cursor) reads the same rules. |
 | `/qa-ai-os:gate <stage>` | Runs a lifecycle gate — asks technical and business questions, collects evidence, returns PASS / HOLD / KILL, saves the verdict. |
 | `/qa-ai-os:review` | The critic loop: classify the change from the diff, spend only that tier's budget, send it to your configured reviewer (Codex, Claude, Gemini, a PR bot, a fresh session, or a human), answer every finding, verify, split when findings or rounds pile up. |
@@ -144,7 +144,9 @@ schemas: add `--schemas public,api` to both commands.
 "Done" should come with receipts. Every push the gate lets through writes
 `.qa-ai-os/receipts/<commit>.json`: what ran, on which commit, the exit code,
 how long it took, how many tests passed and were skipped (when the runner
-prints a summary), and the last 25 lines of output. From the walkthrough above,
+prints a summary), how many changed lines the tests ran (with
+[`changedLines`](#did-the-tests-run-the-change)), and the last 25 lines of
+output. From the walkthrough above,
 after the fix:
 
 ```json
@@ -235,6 +237,62 @@ records `3 of 3 mutants killed`.
 
 Run it by hand from your repo root with `node <plugin>/scripts/mutate.js`.
 
+## Did the tests run the change?
+
+Green tests prove the tests pass, not that any of them touched what you just
+changed. Add `changedLines` to your test gate and run it with coverage on:
+
+```json
+{ "gates": [
+  { "name": "tests",
+    "run": "npx vitest run --coverage.enabled --coverage.reporter=lcov",
+    "changedLines": { "lcov": "coverage/lcov.info", "include": ["src/"] } }
+] }
+```
+
+After the tests pass, the gate takes the lines added since your default branch
+(`origin/main`) and checks each one against the lines the run executed. A
+change that adds a `discount()` function and a `slug.js` file, with no new
+tests:
+
+```
+QA AI OS push gate: "tests" passed, but 8 of 9 changed lines never ran in any test (11.1%, minimum 100%; changes since origin/main). Push blocked.
+  src/price.js: 6-9
+  src/slug.js: no test loaded this file (lines 1-4)
+Write tests that run these lines, then push again. If a file above was tested, its path in the coverage file may not match the repo's.
+```
+
+With tests for both, the push goes through and the receipt records it:
+
+```json
+"changedLines": { "base": "origin/main", "covered": 9, "total": 9, "min": 100 }
+```
+
+- **A file no test loads counts as never run.** Node, Jest and pytest leave
+  such files out of the coverage report entirely; reading "missing" as
+  "nothing to check" is the hole this closes.
+- **Only code counts.** Comments, blank lines and braces the coverage report
+  doesn't list don't count either way. Test files, `.d.ts` files and anything
+  outside `include` aren't changes that need tests.
+- **Unknown blocks.** No coverage file from this run (an old one is deleted
+  first, so it can't vouch), nothing to compare against, or a bad config: the
+  push is blocked, never waved through.
+- **Options:** `"min": 80` allows a percentage instead of every line;
+  `"exclude": ["src/generated/"]`; `"base": "origin/develop"` (default: the
+  remote's default branch, else the upstream). With `allowDirty`, uncommitted
+  changes are measured too.
+- **Ran is not checked.** Coverage proves a line ran, not that a test would
+  notice it breaking. The [mutation gate](#mutation-gate) proves that part.
+
+Coverage commands that write the lcov file (all tested):
+
+| Runner | `run` | `lcov` |
+|---|---|---|
+| Vitest | `npx vitest run --coverage.enabled --coverage.reporter=lcov` (needs `@vitest/coverage-v8`) | `coverage/lcov.info` |
+| Jest | `npx jest --coverage --coverageReporters=lcov` | `coverage/lcov.info` |
+| node | `node --test --experimental-test-coverage "--test-coverage-include=src/**" --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=lcov.info` | `lcov.info` |
+| pytest | `pytest --cov=src --cov-report=lcov:coverage/lcov.info` (needs `pytest-cov`) | `coverage/lcov.info` |
+
 ## `.qa-ai-os.json`
 
 ```json
@@ -267,6 +325,9 @@ never a pass. Counts land in the receipt either way:
 ```json
 "tests": { "runner": "vitest", "passed": 852, "failed": 0, "skipped": 0 }
 ```
+
+**`changedLines`:** require the tests to run the lines this push changes. See
+[Did the tests run the change?](#did-the-tests-run-the-change)
 
 ## Developing
 

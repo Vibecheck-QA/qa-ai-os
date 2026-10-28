@@ -12,8 +12,7 @@ const { spawn, spawnSync } = require('child_process');
 const ROOT = path.join(__dirname, '..');
 
 // Each target runs only the tests that cover it: never redo work (QUALITY.md §0).
-// No test file drives another target's script, so the targets run side by side,
-// one lane each; within a lane, one mutant at a time.
+// A mutant can also name its own `suite`.
 const TARGETS = {
   'scripts/push-gate.js': 'test/push-gate.test.js',
   'scripts/design-check.js': 'test/design-check.test.js',
@@ -21,7 +20,21 @@ const TARGETS = {
   'scripts/mutate.js': 'test/mutate-runner.test.js',
   'scripts/run-timed.js': 'test/mutate-runner.test.js',
   'scripts/test-counts.js': 'test/test-counts.test.js',
+  'scripts/diff-coverage.js': 'test/diff-coverage.test.js',
 };
+
+// Lanes run side by side; within a lane, one mutant at a time. Scripts that load
+// each other share a lane: the push gate loads run-timed, test-counts,
+// diff-coverage and (as a builtin gate) mutate, so a push-gate mutant tested
+// while another lane had run-timed broken would be "killed" by the wrong break.
+const LANES = [
+  ['scripts/push-gate.js', 'scripts/run-timed.js', 'scripts/test-counts.js', 'scripts/diff-coverage.js', 'scripts/mutate.js'],
+  ['scripts/design-check.js'],
+  ['scripts/rls-check.js'],
+];
+for (const f of Object.keys(TARGETS)) {
+  if (LANES.flat().filter((x) => x === f).length !== 1) throw new Error(`${f} must be in exactly one lane`);
+}
 
 const PUSH_GATE = [
   {
@@ -162,12 +175,42 @@ const COUNTS = [
   { name: 'node spec todo is not skipped', find: "skipped: (skip ? +skip[1] : 0) + (todo ? +todo[1] : 0) };\n  }],\n  // vitest", replace: "skipped: (skip ? +skip[1] : 0) };\n  }],\n  // vitest" },
 ];
 
+const DIFF_COVERAGE = [
+  { name: 'line numbers stop advancing', find: '        at++; newLeft--;\n        continue;', replace: '        newLeft--;\n        continue;' },
+  { name: '"no newline" markers are read as lines', find: "if (body.startsWith('\\\\')) continue;", replace: '' },
+  { name: 'quoted paths keep their quotes', find: `if (p.startsWith('"')) {`, replace: 'if (false) {' },
+  { name: 'the same file twice: the last record wins', find: 'lines.set(line, Math.max(lines.get(line) || 0, Number(hits) || 0));', replace: 'lines.set(line, Number(hits) || 0);' },
+  { name: 'absolute lcov paths never match', find: 'path.isAbsolute(sf) ? path.relative(root, sf) : sf', replace: 'sf' },
+  { name: 'backslash lcov paths never match', find: "p.replace(/\\\\/g, '/')", replace: 'p' },
+  { name: 'lines lcov does not list count as missed', find: 'if (!hits.has(line)) continue; // not code', replace: 'if (!hits.has(line)) { total++; missed.push(line); continue; }' },
+  { name: 'blank lines in a never-loaded file count', find: '} else if (text.trim()) {', replace: '} else {' },
+  { name: 'test files count as changes that need tests', find: ' || TEST_FILES.some((re) => re.test(file))) continue;', replace: ') continue;' },
+  { name: '"exclude" is ignored', find: ' || under(key, exclude) ||', replace: ' ||' },
+  { name: '"include" is ignored', find: 'if (!under(key, include) ||', replace: 'if (' },
+  { name: 'a never-loaded file is skipped', find: '      } else if (text.trim()) {\n        total++;\n        missed.push(line);\n      }', replace: '      }' },
+  { name: 'no base: everything passes', find: "if (!base) {\n    return { error:", replace: "if (!base) {\n    return { base: 'none', covered: 0, total: 0, percent: 100, files: [] };\n    return { error:" },
+  { name: 'a missing coverage file counts as empty', find: "try { lcov = parseLcov(fs.readFileSync(lcovFile, 'utf8'), root); } catch {", replace: "try { lcov = parseLcov(fs.readFileSync(lcovFile, 'utf8'), root); } catch { lcov = new Map(); } if (false) {" },
+];
+
+const COVERAGE_GATE = [
+  { name: 'an old coverage file is kept', find: 'try { fs.rmSync(path.resolve(root, gate.changedLines.lcov), { force: true }); }', replace: 'try { }' },
+  { name: 'the bar is "any line ran"', find: 'if (cov.covered * 100 < min * cov.total) {', replace: 'if (cov.total > 0 && cov.covered === 0) {' },
+  { name: '"min" defaults to 0', find: 'gate.changedLines.min === undefined ? 100', replace: 'gate.changedLines.min === undefined ? 0' },
+  { name: 'unknown coverage is a pass', find: '      if (cov.error) {\n        return { allow: false,', replace: '      if (cov.error) {\n        return { allow: true };\n        return { allow: false,' },
+  { name: 'uncommitted changes are not measured', find: '{ worktree: Boolean(dirty) }', replace: '{}' },
+  { name: 'coverage never reaches the receipt', find: 'ran[ran.length - 1].changedLines = ', replace: 'void ' },
+  { name: 'a malformed "changedLines" is accepted', find: "const badCoverage = gates.find((g) => g && g.changedLines !== undefined && !validChangedLines(g.changedLines));", replace: 'const badCoverage = null;' },
+  { name: '"min" out of range is accepted', find: " && s.min >= 0 && s.min <= 100))", replace: '))' },
+];
+
 const MUTANTS = [
   ...PUSH_GATE.map((m) => ({ ...m, file: 'scripts/push-gate.js' })),
   ...DESIGN.map((m) => ({ ...m, file: 'scripts/design-check.js' })),
   ...RLS.map((m) => ({ ...m, file: 'scripts/rls-check.js' })),
   ...MUTATE.map((m) => ({ ...m, file: 'scripts/mutate.js' })),
   ...COUNTS.map((m) => ({ ...m, file: 'scripts/test-counts.js' })),
+  ...DIFF_COVERAGE.map((m) => ({ ...m, file: 'scripts/diff-coverage.js' })),
+  ...COVERAGE_GATE.map((m) => ({ ...m, file: 'scripts/push-gate.js', suite: 'test/diff-coverage.test.js' })),
   { file: 'scripts/run-timed.js', name: 'a timeout kills only the shell', find: "if (win) spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });\n    else { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* already gone */ } }", replace: 'child.kill();' },
 ];
 
@@ -198,17 +241,19 @@ const originals = Object.fromEntries(Object.keys(TARGETS).map((f) => [f, fs.read
 const restoreAll = () => { for (const [f, body] of Object.entries(originals)) fs.writeFileSync(path.join(ROOT, f), body); };
 
 // A mutant's suite that couldn't start counts as SURVIVED: unknown is never "killed".
-async function runLane(file, results) {
-  const target = path.join(ROOT, file);
-  const original = originals[file];
-  for (const m of MUTANTS.filter((x) => x.file === file)) {
-    if (!original.includes(m.find)) { results.set(m, 'missing'); continue; }
-    fs.writeFileSync(target, original.replace(m.find, m.replace));
-    // A mutation that didn't land is a fake pass; prove it applied.
-    if (fs.readFileSync(target, 'utf8') === original) throw new Error(`mutant did not apply: ${m.name}`);
-    const code = await runSuiteAsync(TARGETS[file], m.only);
-    fs.writeFileSync(target, original); // restore from the byte copy, never by reversing the edit
-    results.set(m, code !== null && code !== 0 ? 'killed' : 'survived');
+async function runLane(files, results) {
+  for (const file of files) {
+    const target = path.join(ROOT, file);
+    const original = originals[file];
+    for (const m of MUTANTS.filter((x) => x.file === file)) {
+      if (!original.includes(m.find)) { results.set(m, 'missing'); continue; }
+      fs.writeFileSync(target, original.replace(m.find, m.replace));
+      // A mutation that didn't land is a fake pass; prove it applied.
+      if (fs.readFileSync(target, 'utf8') === original) throw new Error(`mutant did not apply: ${m.name}`);
+      const code = await runSuiteAsync(m.suite || TARGETS[file], m.only);
+      fs.writeFileSync(target, original); // restore from the byte copy, never by reversing the edit
+      results.set(m, code !== null && code !== 0 ? 'killed' : 'survived');
+    }
   }
 }
 
@@ -216,7 +261,7 @@ async function main() {
   const results = new Map();
   try {
     // allSettled: a lane that throws must not leave the others mutating after the restore.
-    const lanes = await Promise.allSettled(Object.keys(TARGETS).map((f) => runLane(f, results)));
+    const lanes = await Promise.allSettled(LANES.map((files) => runLane(files, results)));
     const failed = lanes.find((l) => l.status === 'rejected');
     if (failed) throw failed.reason;
   } finally {
