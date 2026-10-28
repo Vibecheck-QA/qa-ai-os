@@ -33,7 +33,13 @@ For each candidate, run it **on the current commit** and record exit code and
 duration. Then check for known lies:
 
 - **Zero tests counts as a pass?** (e.g. `--passWithNoTests`, a runner that
-  exits 0 with no files). Look for the test count in the output; 0 is a FAIL.
+  exits 0 with no files, a filter that silently skips whole files). Set
+  `"minTests"` on every test gate to the passing count you just saw (round down
+  a little if it varies), and `"maxSkipped"` to today's skipped count. The push
+  gate reads the runner's summary (node, Vitest, Jest, Mocha, pytest,
+  Playwright) and blocks below the minimum, or when it can't find a summary at
+  all. Rerun the gate to confirm the count reads; if it doesn't, say so and
+  leave the limits off rather than install a gate that always blocks.
 - **Pipelines** (`| grep`, `| tail`, `| tee`) hide the real exit code. A gate
   must be a command whose own exit code means pass/fail.
 - **Type check excludes the tests?** (check `tsconfig` `exclude`, etc.) Say so.

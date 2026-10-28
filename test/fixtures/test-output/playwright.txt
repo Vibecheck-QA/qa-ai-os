@@ -1,0 +1,28 @@
+
+Running 4 tests using 1 worker
+
+  ✓  1 a.spec.js:2:1 › one (6ms)
+  ✓  2 a.spec.js:3:1 › two (2ms)
+  -  3 a.spec.js:4:6 › skipped
+  ✘  4 a.spec.js:5:1 › bad (3ms)
+
+
+  1) a.spec.js:5:1 › bad ───────────────────────────────────────────────────────────────────────────
+
+    Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m2[39m
+    Received: [31m1[39m
+
+      3 | test('two', () => expect(2).toBe(2));
+      4 | test.skip('skipped', () => {});
+    > 5 | test('bad', () => expect(1).toBe(2));
+        |                             ^
+      6 |
+
+        at /home/dev/app\pw\a.spec.js:5:29
+
+  1 failed
+    a.spec.js:5:1 › bad ────────────────────────────────────────────────────────────────────────────
+  1 skipped
+  2 passed (719ms)

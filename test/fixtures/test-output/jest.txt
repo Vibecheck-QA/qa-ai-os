@@ -1,0 +1,26 @@
+FAIL j/a.test.js
+  √ one (2 ms)
+  √ two (1 ms)
+  × bad (1 ms)
+  ○ skipped skipped
+
+  ● bad
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 2
+    Received: 1
+
+    [0m [90m 2 |[39m test([32m'two'[39m[33m,[39m () [33m=>[39m expect([35m2[39m)[33m.[39mtoBe([35m2[39m))[33m;[39m
+     [90m 3 |[39m test[33m.[39mskip([32m'skipped'[39m[33m,[39m () [33m=>[39m {})[33m;[39m
+    [31m[1m>[22m[39m[90m 4 |[39m test([32m'bad'[39m[33m,[39m () [33m=>[39m expect([35m1[39m)[33m.[39mtoBe([35m2[39m))[33m;[39m
+     [90m   |[39m                             [31m[1m^[22m[39m
+     [90m 5 |[39m[0m
+
+      at Object.toBe (a.test.js:4:29)
+
+Test Suites: 1 failed, 1 total
+Tests:       1 failed, 1 skipped, 2 passed, 4 total
+Snapshots:   0 total
+Time:        0.467 s
+Ran all test suites.
