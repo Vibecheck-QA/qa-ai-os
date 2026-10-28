@@ -98,8 +98,11 @@ Add it to the config as `"roles"`. The push gate ignores `roles`; it only runs
 
 Explain: from now on, when an
 AI agent in Claude Code runs `git push`, the push gate re-runs these on the
-commit being pushed and blocks the push if any fails. A pass is remembered per
-commit, so an unchanged commit doesn't re-run.
+commit being pushed and blocks the push if any fails. Every pass writes a
+receipt to `.qa-ai-os/receipts/<commit>.json` (each command, exit code,
+duration, output tail); offer to add `.qa-ai-os/receipts/` to `.gitignore`. A
+pass is remembered per commit while its receipt exists, so an unchanged commit
+doesn't re-run.
 
 ## 4. Vendor the contract into AGENTS.md
 - Read `${CLAUDE_PLUGIN_ROOT}/rules/QUALITY.md`.

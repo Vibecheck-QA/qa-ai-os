@@ -9,6 +9,11 @@
 // Only a PASS is cached (keyed by repo + HEAD sha + gate config), so a failure
 // is never remembered as "seen" and always re-runs.
 //
+// Every pass leaves a receipt: .qa-ai-os/receipts/<sha>.json with each command,
+// its exit code, how long it took and the tail of its output. A pass is only
+// trusted from the cache while its receipt exists, and a pass whose receipt
+// can't be written blocks: "done" comes with proof or not at all.
+//
 // No .qa-ai-os.json => no gate (repos opt in). Any internal error => block
 // (fail closed); hooks.json also sets onFailure: "block".
 
@@ -21,6 +26,7 @@ const { spawnSync } = require('child_process');
 
 const CONFIG_FILE = '.qa-ai-os.json';
 const OUTPUT_TAIL_LINES = 25;
+const RECEIPT_DIR = path.join('.qa-ai-os', 'receipts');
 
 // Split a shell command into simple segments on ; && || | and newlines.
 function segments(cmd) {
@@ -67,6 +73,15 @@ function loadCache(file) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; }
 }
 
+// True only if the receipt on disk is a pass for this exact commit and gate
+// config (switching configs and back must not reuse another config's receipt).
+function receiptVouches(file, sha, configHash) {
+  try {
+    const r = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return r.result === 'pass' && r.commit === sha && r.config === configHash;
+  } catch { return false; }
+}
+
 // Pure decision function: returns { allow: true } or { allow: false, reason }.
 function evaluate({ command, cwd, dataDir }) {
   const { push, dir } = detectPush(command);
@@ -96,13 +111,18 @@ function evaluate({ command, cwd, dataDir }) {
   const cacheKey = `${root}::${sha}::${configHash}`;
   const cacheFile = dataDir ? path.join(dataDir, 'push-gate-passes.json') : null;
   const cache = cacheFile ? loadCache(cacheFile) : {};
-  if (cache[cacheKey]) return { allow: true, cached: true };
+  const receiptFile = path.join(root, RECEIPT_DIR, `${sha}.json`);
+  if (cache[cacheKey] && receiptVouches(receiptFile, sha, configHash)) return { allow: true, cached: true };
 
+  const ranAt = new Date().toISOString();
+  const ran = [];
   for (const gate of gates) {
     const name = gate.name || gate.run;
     const timeoutMs = (gate.timeoutSeconds || 300) * 1000;
+    const started = Date.now();
     const r = spawnSync(gate.run, { cwd: root, shell: true, encoding: 'utf8', timeout: timeoutMs });
     const output = `${r.stdout || ''}\n${r.stderr || ''}`;
+    ran.push({ name, run: gate.run, exit: r.status, ms: Date.now() - started, output: tail(output, OUTPUT_TAIL_LINES) });
     if (r.error && r.error.code === 'ETIMEDOUT') {
       return { allow: false, reason: `QA AI OS push gate: "${name}" timed out after ${timeoutMs / 1000}s. Push blocked.` };
     }
@@ -116,7 +136,23 @@ function evaluate({ command, cwd, dataDir }) {
     }
   }
 
-  // Record the pass only after every gate succeeded.
+  // Every gate succeeded: write the receipt, then remember the pass.
+  // dirty: allowDirty let uncommitted changes in, so the gates ran on more than
+  // the commit; the receipt says so rather than vouching for the commit alone.
+  const receipt = { receipt: 'qa-ai-os push gate', result: 'pass', commit: sha, config: configHash, dirty: Boolean(dirty), ranAt, gates: ran };
+  try {
+    fs.mkdirSync(path.dirname(receiptFile), { recursive: true });
+    fs.writeFileSync(`${receiptFile}.tmp`, JSON.stringify(receipt, null, 2) + '\n');
+    fs.renameSync(`${receiptFile}.tmp`, receiptFile);
+  } catch (err) {
+    return {
+      allow: false,
+      reason:
+        `QA AI OS push gate: every gate passed, but the receipt could not be written to ${path.join(RECEIPT_DIR, `${sha}.json`)} (${err.message}).\n` +
+        'Push blocked: a pass has to come with its receipt.',
+    };
+  }
+
   if (cacheFile) {
     cache[cacheKey] = new Date().toISOString();
     fs.mkdirSync(path.dirname(cacheFile), { recursive: true });

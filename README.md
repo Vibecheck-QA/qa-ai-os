@@ -20,11 +20,11 @@ Scripts run before any AI, the cheap model does the routing, a pass is never
 re-earned, and a check that never catches anything gets cut. See
 `rules/QUALITY.md` §0.
 
-## What's in v0.7
+## What's in v0.8
 
 | Piece | What it does |
 |---|---|
-| **Push gate** (hook) | When an AI agent runs `git push`, re-runs your gates on the exact commit being pushed and blocks the push if any fails. Catches the classic `tests \| grep FAIL && git push` lie. Remembers a pass per commit; never remembers a failure. Fails closed. |
+| **Push gate** (hook) | When an AI agent runs `git push`, re-runs your gates on the exact commit being pushed and blocks the push if any fails. Catches the classic `tests \| grep FAIL && git push` lie. Every pass leaves a [receipt](#receipts): the commit, each command, its exit code and output. Remembers a pass per commit; never remembers a failure. Fails closed. |
 | `/qa-ai-os:init` | Detects your stack, proposes honest gate commands, proves they can pass *and* fail, and installs the quality contract into `AGENTS.md` so every AI agent (Claude, Codex, Cursor) reads the same rules. |
 | `/qa-ai-os:gate <stage>` | Runs a lifecycle gate — asks technical and business questions, collects evidence, returns PASS / HOLD / KILL, saves the verdict. |
 | `/qa-ai-os:review` | The critic loop: classify the change from the diff, spend only that tier's budget, send it to your configured reviewer (Codex, Claude, Gemini, a PR bot, a fresh session, or a human), answer every finding, verify, split when findings or rounds pile up. |
@@ -97,8 +97,12 @@ You don't run anything before a push: the push gate does that on its own.
    ```
 
    Nothing reaches the remote. The agent sees the reason and has to fix the
-   code, not the report. Once a commit passes, pushing it again doesn't re-run
-   the gates; a failure is never remembered, so every retry re-checks.
+   code, not the report. A failure is never remembered, so every retry
+   re-checks.
+
+   Once the fix is committed, the push goes through and leaves a
+   [receipt](#receipts) for that commit in `.qa-ai-os/receipts/`. Pushing the
+   same commit again doesn't re-run the gates.
 
 3. **Write the tests that matter.** On a Supabase or Stripe app, run
    `/qa-ai-os:first-tests`. It adds the checks for the bugs that hurt most
@@ -134,6 +138,47 @@ that skips RLS. The result carries its own md5, so a copy that was edited or
 cut short on the way back is refused, never checked. Exit 0 = pass,
 1 = findings, 2 = couldn't check. Other API
 schemas: add `--schemas public,api` to both commands.
+
+## Receipts
+
+"Done" should come with receipts. Every push the gate lets through writes
+`.qa-ai-os/receipts/<commit>.json`: what ran, on which commit, the exit code,
+how long it took, and the last 25 lines of output. From the walkthrough above,
+after the fix:
+
+```json
+{
+  "receipt": "qa-ai-os push gate",
+  "result": "pass",
+  "commit": "7f2ccd713a840b07074afe8acc7237615425d382",
+  "config": "b7595aef2d46",
+  "dirty": false,
+  "ranAt": "2026-10-28T00:03:48.349Z",
+  "gates": [
+    {
+      "name": "tests",
+      "run": "npm test",
+      "exit": 0,
+      "ms": 6232,
+      "output": "...\n# tests 1\n# pass 1\n# fail 0\n# skipped 0\n# duration_ms 107.458"
+    }
+  ]
+}
+```
+
+- **Written by the gate, not by the AI.** It's code that runs after every gate
+  passed, so it can't be talked into one. A blocked push leaves no receipt.
+- **No receipt, no pass.** A cached pass only counts while its receipt exists
+  and matches the commit and gate config. Delete it and the gates run again. A
+  receipt written by hand doesn't skip anything: the gate also checks its own
+  record of the pass, kept outside the repo.
+- **If the receipt can't be written, the push is blocked.**
+- **`dirty: true`** means `allowDirty` let uncommitted changes in, so the gates
+  ran on more than the commit. The receipt says so instead of vouching for the
+  commit alone.
+- **Receipts are local and untracked.** Add `.qa-ai-os/receipts/` to
+  `.gitignore` to keep them out of `git status`, or commit them as an audit
+  trail.
 
 ## `.qa-ai-os.json`
 

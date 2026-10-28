@@ -118,6 +118,107 @@ test('a new commit invalidates the cached pass', () => {
   assert.strictEqual(fs.readFileSync(path.join(dir, 'runs.txt'), 'utf8'), 'xx');
 });
 
+const receiptOf = (dir, g) => {
+  const sha = g('rev-parse', 'HEAD').stdout.trim();
+  return { sha, file: path.join(dir, '.qa-ai-os', 'receipts', `${sha}.json`) };
+};
+
+test('a pass leaves a receipt: the commit, each command, its exit code and output', () => {
+  const tests = 'node -e "console.log(\'# pass 12\')"';
+  const { dir, g } = makeRepo({ gates: [{ name: 'tests', run: tests }, { name: 'types', run: PASS }] });
+  assert.strictEqual(runHook('git push', dir, dataDir()).status, 0);
+  const { sha, file } = receiptOf(dir, g);
+  const r = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.strictEqual(r.result, 'pass');
+  assert.strictEqual(r.commit, sha);
+  assert.strictEqual(r.dirty, false);
+  assert.deepStrictEqual(r.gates.map((x) => [x.name, x.run, x.exit]), [['tests', tests, 0], ['types', PASS, 0]]);
+  assert.match(r.gates[0].output, /# pass 12/);
+  assert.ok(Number.isFinite(r.gates[0].ms));
+});
+
+test('a blocked push leaves no receipt', () => {
+  const { dir, g } = makeRepo({ gates: [{ name: 'tests', run: FAIL }] });
+  assert.strictEqual(runHook('git push', dir, dataDir()).status, 2);
+  assert.strictEqual(fs.existsSync(receiptOf(dir, g).file), false);
+});
+
+test('a cached pass needs its receipt: delete it and the gates re-run', () => {
+  const { dir, g } = makeRepo({ gates: [{ name: 'count', run: COUNT }] });
+  const data = dataDir();
+  runHook('git push', dir, data);
+  const { file } = receiptOf(dir, g);
+  fs.rmSync(file);
+  assert.strictEqual(runHook('git push', dir, data).status, 0);
+  assert.strictEqual(fs.readFileSync(path.join(dir, 'runs.txt'), 'utf8'), 'xx');
+  assert.ok(fs.existsSync(file), 'the re-run writes the receipt again');
+});
+
+test('a receipt from another gate config does not vouch for this one', () => {
+  // A passes, B passes (its receipt replaces A's), back to A: A's cached pass
+  // must not lean on B's receipt, so the gates re-run.
+  const a = { allowDirty: true, gates: [{ name: 'count', run: COUNT }] };
+  const b = { allowDirty: true, gates: [{ name: 'count', run: COUNT }, { name: 'tests', run: PASS }] };
+  const { dir } = makeRepo(a);
+  const data = dataDir();
+  const cfg = path.join(dir, '.qa-ai-os.json');
+  runHook('git push', dir, data);
+  fs.writeFileSync(cfg, JSON.stringify(b));
+  runHook('git push', dir, data);
+  fs.writeFileSync(cfg, JSON.stringify(a));
+  assert.strictEqual(runHook('git push', dir, data).status, 0);
+  assert.strictEqual(fs.readFileSync(path.join(dir, 'runs.txt'), 'utf8'), 'xxx');
+});
+
+test('a hand-written receipt is not a pass: the gates still run', () => {
+  // An agent could write a receipt file itself. Only a pass the gate recorded
+  // (its cache, outside the repo) plus a matching receipt skips the gates.
+  const forge = (dir, gates) => {
+    const sha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).stdout.trim();
+    const config = require('crypto').createHash('sha256').update(JSON.stringify(gates)).digest('hex').slice(0, 12);
+    fs.mkdirSync(path.join(dir, '.qa-ai-os', 'receipts'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.qa-ai-os', 'receipts', `${sha}.json`), JSON.stringify({ result: 'pass', commit: sha, config }));
+  };
+
+  // A failed push, then a forged receipt for that commit: still blocked.
+  const failing = [{ name: 'tests', run: FAIL }];
+  const f = makeRepo({ gates: failing });
+  const fData = dataDir();
+  assert.strictEqual(runHook('git push', f.dir, fData).status, 2);
+  forge(f.dir, failing);
+  assert.strictEqual(runHook('git push', f.dir, fData).status, 2, 'failed commit');
+
+  // A pass on one commit, a forged receipt for the next: the gates run.
+  const counting = [{ name: 'count', run: COUNT }];
+  const c = makeRepo({ gates: counting });
+  const cData = dataDir();
+  runHook('git push', c.dir, cData);
+  fs.writeFileSync(path.join(c.dir, 'a.txt'), 'two\n');
+  c.g('commit', '-q', '-am', 'second');
+  forge(c.dir, counting);
+  runHook('git push', c.dir, cData);
+  assert.strictEqual(fs.readFileSync(path.join(c.dir, 'runs.txt'), 'utf8'), 'xx', 'new commit');
+
+  // A pass under one config, a forged receipt for a new config: the gates run.
+  const other = [{ name: 'count', run: COUNT }, { name: 'tests', run: PASS }];
+  const k = makeRepo({ allowDirty: true, gates: counting });
+  const kData = dataDir();
+  runHook('git push', k.dir, kData);
+  fs.writeFileSync(path.join(k.dir, '.qa-ai-os.json'), JSON.stringify({ allowDirty: true, gates: other }));
+  forge(k.dir, other);
+  runHook('git push', k.dir, kData);
+  assert.strictEqual(fs.readFileSync(path.join(k.dir, 'runs.txt'), 'utf8'), 'xx', 'new config');
+});
+
+test('a pass whose receipt cannot be written blocks the push', () => {
+  const { dir } = makeRepo({ gates: [{ name: 'tests', run: PASS }] });
+  fs.mkdirSync(path.join(dir, '.qa-ai-os'));
+  fs.writeFileSync(path.join(dir, '.qa-ai-os', 'receipts'), 'a file where the folder should be'); // untracked
+  const r = runHook('git push', dir, dataDir());
+  assert.strictEqual(r.status, 2);
+  assert.match(r.stderr, /receipt could not be written/);
+});
+
 test('rejection path: a failure is NOT cached, so the next push re-runs the gate', () => {
   const marker = 'node -e "require(\'fs\').appendFileSync(\'runs.txt\',\'x\'); process.exit(require(\'fs\').existsSync(\'ok\') ? 0 : 1)"';
   const { dir } = makeRepo({ gates: [{ name: 'flaky', run: marker }] });
@@ -161,6 +262,9 @@ test('allowDirty skips the dirty-tree check', () => {
   const { dir } = makeRepo({ allowDirty: true, gates: [{ name: 'tests', run: PASS }] });
   fs.writeFileSync(path.join(dir, 'a.txt'), 'dirty\n');
   assert.strictEqual(runHook('git push', dir, dataDir()).status, 0);
+  const sha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).stdout.trim();
+  const r = JSON.parse(fs.readFileSync(path.join(dir, '.qa-ai-os', 'receipts', `${sha}.json`), 'utf8'));
+  assert.strictEqual(r.dirty, true, 'the receipt says the gates ran on more than the commit');
 });
 
 test('git -C targets the other repo\'s config', () => {
