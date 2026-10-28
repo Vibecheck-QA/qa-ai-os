@@ -7,6 +7,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
+const tmpDir = require('./tmp.js');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
@@ -30,7 +31,7 @@ const TESTS = [
 ].join('\n');
 
 function project({ calc = CALC, mutants, run = 'node test.js', extra = {} } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-mutate-'));
+  const dir = tmpDir('qa-mutate-');
   fs.writeFileSync(path.join(dir, 'calc.js'), calc);
   fs.writeFileSync(path.join(dir, 'test.js'), TESTS);
   if (mutants) {

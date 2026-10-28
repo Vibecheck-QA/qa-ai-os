@@ -1,10 +1,11 @@
 {
   "name": "qa-ai-os",
-  "version": "0.13.0",
+  "version": "0.13.1",
   "private": true,
   "description": "QA AI OS: quality gates across the software lifecycle.",
   "scripts": {
     "test": "node --test \"test/*.test.js\"",
+    "test:coverage": "node --test --experimental-test-coverage \"--test-coverage-include=scripts/**\" \"--test-coverage-include=stacks/**/*.mjs\" --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=lcov.info \"test/*.test.js\"",
     "mutate": "node test/mutate.js",
     "mutate:changed": "node test/mutate.js --changed",
     "sync-agents": "node scripts/sync-agents.js",

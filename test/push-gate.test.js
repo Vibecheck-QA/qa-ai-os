@@ -7,6 +7,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
+const tmpDir = require('./tmp.js');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { detectPush } = require('../scripts/push-gate.js');
@@ -14,7 +15,7 @@ const { detectPush } = require('../scripts/push-gate.js');
 const SCRIPT = path.join(__dirname, '..', 'scripts', 'push-gate.js');
 
 function makeRepo(config) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-gate-'));
+  const dir = tmpDir('qa-gate-');
   const g = (...args) => spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
   g('init', '-q', '-b', 'main');
   g('config', 'user.email', 't@example.com');
@@ -35,7 +36,7 @@ function runHook(command, cwd, dataDir) {
   });
 }
 
-const dataDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'qa-gate-data-'));
+const dataDir = () => tmpDir('qa-gate-data-');
 const PASS = 'node -e "process.exit(0)"';
 const FAIL = 'node -e "console.log(\'boom: 3 tests failed\'); process.exit(1)"';
 // Appends to runs.txt each time it runs, so tests can count executions.

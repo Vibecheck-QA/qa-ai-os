@@ -7,6 +7,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
+const tmpDir = require('./tmp.js');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { addedLines, parseLcov, ranges } = require('../scripts/diff-coverage.js');
@@ -15,8 +16,7 @@ const SCRIPT = path.join(__dirname, '..', 'scripts', 'push-gate.js');
 const lcovFixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', 'lcov', `${name}.info`), 'utf8');
 
 function tmp(t, prefix) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const dir = tmpDir(prefix);
   return dir;
 }
 

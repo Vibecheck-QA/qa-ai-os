@@ -7,6 +7,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
+const tmpDir = require('./tmp.js');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { parseColor, contrast } = require('../scripts/design-check.js');
@@ -14,7 +15,7 @@ const { parseColor, contrast } = require('../scripts/design-check.js');
 const SCRIPT = path.join(__dirname, '..', 'scripts', 'design-check.js');
 
 function makeRepo(files, design) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-design-'));
+  const dir = tmpDir('qa-design-');
   spawnSync('git', ['init', '-q'], { cwd: dir });
   const all = { ...files };
   if (design !== undefined) all['.qa-ai-os.json'] = JSON.stringify({ gates: [], design });

@@ -8,6 +8,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
+const tmpDir = require('./tmp.js');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
@@ -16,8 +17,7 @@ const FAKE_GH = path.join(__dirname, 'fixtures', 'fake-gh.js');
 const LABEL = 'qa-ai-os-prod';
 
 function world(t, issues = []) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-prod-'));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const dir = tmpDir('qa-prod-');
   const file = path.join(dir, 'gh.json');
   fs.writeFileSync(file, JSON.stringify({ issues, calls: [] }));
   const run = (env) => spawnSync(process.execPath, [SCRIPT], {

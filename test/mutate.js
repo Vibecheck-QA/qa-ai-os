@@ -11,6 +11,29 @@ const { spawn, spawnSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
 
+// A killed run must not leave a script broken on purpose. Each file is backed
+// up before it's mutated, and the next run puts it back before reading anything.
+// Same folder as the shipped runner, so the push gate refuses to push past it.
+// Kept separate from scripts/mutate.js's recover(): that file is a target here.
+const BACKUP_DIR = path.join(ROOT, '.qa-ai-os', 'mutate-backup');
+function putBack() {
+  const restored = [];
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) { walk(p); continue; }
+      const rel = path.relative(BACKUP_DIR, p);
+      fs.writeFileSync(path.join(ROOT, rel), fs.readFileSync(p));
+      restored.push(rel.replace(/\\/g, '/'));
+    }
+  };
+  if (fs.existsSync(BACKUP_DIR)) walk(BACKUP_DIR);
+  fs.rmSync(BACKUP_DIR, { recursive: true, force: true });
+  return restored;
+}
+const putBackAtStart = putBack();
+if (putBackAtStart.length) console.log(`An interrupted run left files mutated; put back from the backup: ${putBackAtStart.join(', ')}\n`);
+
 // Each target runs only the tests that cover it: never redo work (QUALITY.md §0).
 // A mutant can also name its own `suite`.
 const TARGETS = {
@@ -23,6 +46,9 @@ const TARGETS = {
   'scripts/diff-coverage.js': 'test/diff-coverage.test.js',
   'scripts/stack.js': 'test/stack.test.js',
   'stacks/nextjs/files/.github/qa-ai-os/prod-alert.mjs': 'test/prod-alert.test.js',
+  // Every suite loads tmp.js, but its only mutant (no cleanup) can't change
+  // another suite's verdict, so it gets its own lane.
+  'test/tmp.js': 'test/repo-contract.test.js',
 };
 
 // Lanes run side by side; within a lane, one mutant at a time. Scripts that load
@@ -35,6 +61,7 @@ const LANES = [
   ['scripts/rls-check.js'],
   ['scripts/stack.js'],
   ['stacks/nextjs/files/.github/qa-ai-os/prod-alert.mjs'],
+  ['test/tmp.js'],
 ];
 for (const f of Object.keys(TARGETS)) {
   if (LANES.flat().filter((x) => x === f).length !== 1) throw new Error(`${f} must be in exactly one lane`);
@@ -237,6 +264,7 @@ const PROD_ALERT = [
 ];
 
 const MUTANTS = [
+  { file: 'test/tmp.js', name: 'temp folders are never deleted', find: '  for (const dir of made) fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });\n', replace: '' },
   ...PROD_ALERT.map((m) => ({ ...m, file: 'stacks/nextjs/files/.github/qa-ai-os/prod-alert.mjs' })),
   ...STACK.map((m) => ({ ...m, file: 'scripts/stack.js' })),
   ...PUSH_GATE.map((m) => ({ ...m, file: 'scripts/push-gate.js' })),
@@ -325,7 +353,10 @@ if (runSuite().status !== 0) {
 }
 
 const originals = Object.fromEntries(Object.keys(TARGETS).map((f) => [f, fs.readFileSync(path.join(ROOT, f), 'utf8')]));
-const restoreAll = () => { for (const [f, body] of Object.entries(originals)) fs.writeFileSync(path.join(ROOT, f), body); };
+const restoreAll = () => {
+  for (const [f, body] of Object.entries(originals)) fs.writeFileSync(path.join(ROOT, f), body);
+  fs.rmSync(BACKUP_DIR, { recursive: true, force: true }); // every file is its original again
+};
 
 // A mutant's suite that couldn't start counts as SURVIVED: unknown is never "killed".
 async function runLane(files, results) {
@@ -334,11 +365,15 @@ async function runLane(files, results) {
     const original = originals[file];
     for (const m of MUTANTS.filter((x) => x.file === file)) {
       if (!original.includes(m.find)) { results.set(m, 'missing'); continue; }
+      const backup = path.join(BACKUP_DIR, file);
+      fs.mkdirSync(path.dirname(backup), { recursive: true });
+      fs.writeFileSync(backup, original); // before the file is broken, never after
       fs.writeFileSync(target, original.replace(m.find, m.replace));
       // A mutation that didn't land is a fake pass; prove it applied.
       if (fs.readFileSync(target, 'utf8') === original) throw new Error(`mutant did not apply: ${m.name}`);
       const code = await runSuiteAsync(m.suite || TARGETS[file], m.only);
       fs.writeFileSync(target, original); // restore from the byte copy, never by reversing the edit
+      fs.rmSync(backup);
       results.set(m, code !== null && code !== 0 ? 'killed' : 'survived');
     }
   }
