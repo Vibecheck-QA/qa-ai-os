@@ -18,6 +18,8 @@ const TARGETS = {
   'scripts/push-gate.js': 'test/push-gate.test.js',
   'scripts/design-check.js': 'test/design-check.test.js',
   'scripts/rls-check.js': 'test/rls-check.test.js',
+  'scripts/mutate.js': 'test/mutate-runner.test.js',
+  'scripts/run-timed.js': 'test/mutate-runner.test.js',
 };
 
 const PUSH_GATE = [
@@ -41,6 +43,8 @@ const PUSH_GATE = [
   { name: 'a cached pass needs no receipt', find: 'if (cache[cacheKey] && receiptVouches(receiptFile, sha, configHash))', replace: 'if (cache[cacheKey])' },
   { name: "another config's receipt vouches", find: ' && r.config === configHash', replace: '' },
   { name: 'the receipt never says dirty', find: 'dirty: Boolean(dirty),', replace: 'dirty: false,' },
+  { name: 'an interrupted mutation run is not blocked', find: 'if (fs.existsSync(path.join(root, MUTATE_BACKUP))) {', replace: 'if (false) {' },
+  { name: 'a gate with nothing to run is not refused', find: 'const unrunnable = gates.find((g) => !gateCommand(g));', replace: 'const unrunnable = null;' },
   { name: 'a receipt that cannot be written still allows the push', find: '  } catch (err) {\n    return {\n      allow: false,', replace: '  } catch (err) {\n    return { allow: true };\n    return {\n      allow: false,' },
 ];
 
@@ -125,10 +129,25 @@ const RLS = [
   { name: 'free check: an unknown argument is ignored', find: 'if (unknown.length) throw', replace: 'if (false) throw', only: 'free check' },
 ];
 
+const MUTATE = [
+  { name: 'skip the baseline', find: "if (status !== 0) {\n      console.log(`Baseline", replace: "if (false) {\n      console.log(`Baseline" },
+  { name: 'a find that matches twice is used', find: 'if (n !== 1) {', replace: 'if (n === 0) {' },
+  { name: 'a survivor counts as killed', find: "status !== 0 ? 'killed' : 'survived'", replace: "'killed'" },
+  { name: 'a timeout counts as a verdict', find: "if (status === 'timeout') results.push", replace: 'if (false) results.push' },
+  { name: 'unchecked mutants count as a pass', find: 'return unknown ? 2 : 0;', replace: 'return 0;' },
+  { name: 'an interrupted run is not put back', find: 'const restored = recover(root);', replace: 'const restored = [];' },
+  { name: 'CRLF files are not handled', find: "const crlf = text.includes('\\r\\n');", replace: 'const crlf = false;' },
+  { name: "a mutant's own command is ignored", find: 'const cmdFor = (m) => m.run || cfg.run;', replace: 'const cmdFor = (m) => cfg.run;' },
+  { name: 'a mutant that changes nothing is accepted', find: 'if (m.find === m.replace) throw', replace: 'if (false) throw' },
+  { name: 'restore by reversing the edit', find: 'fs.writeFileSync(target, original); // from the byte copy', replace: "fs.writeFileSync(target, fs.readFileSync(target, 'utf8').replace(replace, find)); // from the byte copy" },
+];
+
 const MUTANTS = [
   ...PUSH_GATE.map((m) => ({ ...m, file: 'scripts/push-gate.js' })),
   ...DESIGN.map((m) => ({ ...m, file: 'scripts/design-check.js' })),
   ...RLS.map((m) => ({ ...m, file: 'scripts/rls-check.js' })),
+  ...MUTATE.map((m) => ({ ...m, file: 'scripts/mutate.js' })),
+  { file: 'scripts/run-timed.js', name: 'a timeout kills only the shell', find: "if (win) spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });\n    else { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* already gone */ } }", replace: 'child.kill();' },
 ];
 
 // One Postgres cluster for the whole run (~10 s each to start), shared with every

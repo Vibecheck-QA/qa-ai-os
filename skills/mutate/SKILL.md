@@ -22,6 +22,28 @@ the tests would catch the bug coming back.
    `git status`/`git diff` clean for that file.
 6. **Never run the suite elsewhere** while mutations are in place.
 
+## Run them with the shipped runner
+Don't mutate by hand: write the mutants to `.qa-ai-os/mutants.json` (ask
+first) and run `node ${CLAUDE_PLUGIN_ROOT}/scripts/mutate.js` from the repo
+root. It enforces every rule above (green baseline, byte copy, proof each
+mutation landed, one at a time, verified restore, put back after a killed run)
+and kills a hung test with everything it started.
+
+```json
+{
+  "run": "npm test",
+  "timeoutSeconds": 300,
+  "mutants": [
+    { "name": "total ignores quantity", "file": "src/price.ts", "find": "i.price * i.qty", "replace": "i.price" },
+    { "name": "webhook skips the signature check", "file": "app/api/webhooks/stripe/route.ts", "find": "constructEvent(", "replace": "JSON.parse(", "run": "npx vitest run webhooks" }
+  ]
+}
+```
+
+`find` must match exactly once (add surrounding text until it does). A mutant's
+own `run` narrows it to the tests that cover it (QUALITY.md §0). Exit 0 = all
+killed, 1 = a mutant survived, 2 = couldn't check.
+
 ## Choosing mutants
 For the target guard/fix, break each thing it depends on:
 - flip or drop the condition (`if (x)` → `if (true)` / `if (false)`)
@@ -38,5 +60,9 @@ cosmetic ones.
 ## Report
 Table: mutant → killed/survived → which test caught it. For each survivor:
 either write the test that kills it, or mark it `EXPECTED-SURVIVOR` with a
-reason (e.g. equivalent mutant). Offer to save the mutants as a re-runnable
-script next to the tests (see this plugin's `test/mutate.js` for the shape).
+reason (e.g. equivalent mutant), and take it out of `mutants.json`.
+
+Then offer to make it a push gate, so the proof re-runs on every push and lands
+in the receipt: add `{ "name": "mutation", "builtin": "mutate" }` to `gates` in
+`.qa-ai-os.json` (after the tests: it re-runs them per mutant). Add
+`.qa-ai-os/mutate-backup/` to `.gitignore`.
