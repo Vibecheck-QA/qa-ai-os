@@ -20,7 +20,7 @@ Scripts run before any AI, the cheap model does the routing, a pass is never
 re-earned, and a check that never catches anything gets cut. See
 `rules/QUALITY.md` §0.
 
-## What's in v0.8
+## What's in v0.9
 
 | Piece | What it does |
 |---|---|
@@ -30,7 +30,7 @@ re-earned, and a check that never catches anything gets cut. See
 | `/qa-ai-os:review` | The critic loop: classify the change from the diff, spend only that tier's budget, send it to your configured reviewer (Codex, Claude, Gemini, a PR bot, a fresh session, or a human), answer every finding, verify, split when findings or rounds pile up. |
 | `/qa-ai-os:design` | Agrees a short `DESIGN.md` with you from what your repo already has, then turns every rule a script can check into a push gate: text contrast in every mode (light, dark) read from your tokens, and banned patterns such as light-grey text. Only the rules no script can check go to AI review, inside the normal review round. |
 | `/qa-ai-os:first-tests` | The first tests that matter: user A can never read or change user B's data. For Supabase apps, a push gate reads the database's own catalog and fails on tables with RLS off, policies that let every user through, and views or functions that bypass RLS; then it writes two-user tests in your own test runner. For Stripe apps, tests that nobody gets paid access for free, a forged webhook does nothing, a payment is fulfilled exactly once, the price comes from the server, and refunds and cancellations remove access. Every test is proven able to fail. No local database? A one-query check reads your hosted project's catalog from the SQL editor. |
-| `/qa-ai-os:mutate` | Break a guard on purpose and prove a test catches it. |
+| `/qa-ai-os:mutate` | Break a guard on purpose and prove a test catches it. Saves the breaks so a [mutation gate](#mutation-gate) re-checks them on every push. |
 | `rules/QUALITY.md` | The engineering contract. |
 | `gates/` | Idea · Validate · Spec · **Build** · **Review** · **Ship** · Operate · Grow · Sunset/sale (bold = full; others are question lists). |
 
@@ -179,6 +179,60 @@ after the fix:
 - **Receipts are local and untracked.** Add `.qa-ai-os/receipts/` to
   `.gitignore` to keep them out of `git status`, or commit them as an audit
   trail.
+
+## Mutation gate
+
+A test that stays green when the code is broken protects nothing. List the
+ways your code could break in `.qa-ai-os/mutants.json` (`/qa-ai-os:mutate`
+writes it with you):
+
+```json
+{
+  "run": "npm test",
+  "mutants": [
+    { "name": "total ignores quantity", "file": "price.js", "find": "i.price * i.qty", "replace": "i.price" },
+    { "name": "total starts at 1", "file": "price.js", "find": ", 0)", "replace": ", 1)" },
+    { "name": "total counts only the first item", "file": "price.js", "find": "items.reduce", "replace": "items.slice(0, 1).reduce" }
+  ]
+}
+```
+
+and add the gate that ships with the plugin:
+
+```json
+{ "gates": [
+  { "name": "tests", "run": "npm test" },
+  { "name": "mutation", "builtin": "mutate" }
+] }
+```
+
+On every push it breaks your code one way at a time, runs the tests and
+requires them to fail. The walkthrough's price function, whose only test uses
+one item:
+
+```
+killed    total ignores quantity (price.js)
+killed    total starts at 1 (price.js)
+SURVIVED  total counts only the first item (price.js)
+
+2 of 3 mutants killed, 1 survived (a test that can't catch that break).
+```
+
+The push is blocked until a test with two items catches it. Then the receipt
+records `3 of 3 mutants killed`.
+
+- **It can't fake a result:** it refuses a red baseline, keeps a byte copy of
+  each file, proves each break landed, restores from the copy and checks the
+  bytes match.
+- **A hang is no verdict.** A test that hangs is killed with everything it
+  started, and counts as "couldn't check", never as caught.
+- **A killed run is put back.** Each file is backed up to
+  `.qa-ai-os/mutate-backup/` before it's broken; the next run restores it,
+  and the push gate refuses to push while a backup is waiting.
+- Exit 0 = every mutant killed, 1 = one survived, 2 = couldn't check (a
+  `find` that doesn't match exactly once, a timeout, a red baseline).
+
+Run it by hand from your repo root with `node <plugin>/scripts/mutate.js`.
 
 ## `.qa-ai-os.json`
 

@@ -23,10 +23,25 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
+const { TIMEOUT_MARK } = require('./run-timed.js');
 
 const CONFIG_FILE = '.qa-ai-os.json';
 const OUTPUT_TAIL_LINES = 25;
 const RECEIPT_DIR = path.join('.qa-ai-os', 'receipts');
+const MUTATE_BACKUP = path.join('.qa-ai-os', 'mutate-backup');
+
+// Gates that ship with the plugin: `{ "builtin": "mutate" }` runs this plugin's
+// own script, so a repo never has to know where the plugin is installed.
+const BUILTINS = { mutate: path.join(__dirname, 'mutate.js') };
+
+// The command a gate runs, or null when the gate names nothing runnable.
+function gateCommand(gate) {
+  if (gate && gate.builtin !== undefined) {
+    const script = BUILTINS[gate.builtin];
+    return script ? `"${process.execPath}" "${script}"` : null;
+  }
+  return gate && typeof gate.run === 'string' && gate.run ? gate.run : null;
+}
 
 // Split a shell command into simple segments on ; && || | and newlines.
 function segments(cmd) {
@@ -96,6 +111,22 @@ function evaluate({ command, cwd, dataDir }) {
   const gates = Array.isArray(config.gates) ? config.gates : [];
   if (gates.length === 0) return { allow: true };
 
+  // A mutation run that was killed may have left a file broken on purpose; never
+  // push (or test) until it is put back.
+  if (fs.existsSync(path.join(root, MUTATE_BACKUP))) {
+    return {
+      allow: false,
+      reason:
+        `QA AI OS push gate: a mutation run was interrupted and its backup is still in ${MUTATE_BACKUP}, so a file may still be broken on purpose.\n` +
+        'Run the mutation gate again (it puts the files back first), check `git diff`, then push.',
+    };
+  }
+
+  const unrunnable = gates.find((g) => !gateCommand(g));
+  if (unrunnable) {
+    return { allow: false, reason: `QA AI OS push gate: gate ${JSON.stringify(unrunnable)} has no "run" command or a known "builtin" (${Object.keys(BUILTINS).join(', ')}). Push blocked.` };
+  }
+
   const dirty = git(['status', '--porcelain', '--untracked-files=no'], root);
   if (dirty && !config.allowDirty) {
     return {
@@ -117,13 +148,17 @@ function evaluate({ command, cwd, dataDir }) {
   const ranAt = new Date().toISOString();
   const ran = [];
   for (const gate of gates) {
-    const name = gate.name || gate.run;
+    const cmd = gateCommand(gate);
+    const name = gate.name || gate.run || gate.builtin;
     const timeoutMs = (gate.timeoutSeconds || 300) * 1000;
     const started = Date.now();
-    const r = spawnSync(gate.run, { cwd: root, shell: true, encoding: 'utf8', timeout: timeoutMs });
+    // run-timed.js kills the whole tree on timeout; spawnSync's own timeout leaves the command running.
+    const r = spawnSync(process.execPath, [path.join(__dirname, 'run-timed.js'), String(timeoutMs), cmd],
+      { cwd: root, encoding: 'utf8', timeout: timeoutMs + 30000 });
     const output = `${r.stdout || ''}\n${r.stderr || ''}`;
-    ran.push({ name, run: gate.run, exit: r.status, ms: Date.now() - started, output: tail(output, OUTPUT_TAIL_LINES) });
-    if (r.error && r.error.code === 'ETIMEDOUT') {
+    const timedOut = (r.status === 124 && (r.stderr || '').includes(TIMEOUT_MARK)) || Boolean(r.error && r.error.code === 'ETIMEDOUT');
+    ran.push({ name, run: gate.builtin ? `builtin:${gate.builtin}` : gate.run, exit: r.status, ms: Date.now() - started, output: tail(output, OUTPUT_TAIL_LINES) });
+    if (timedOut) {
       return { allow: false, reason: `QA AI OS push gate: "${name}" timed out after ${timeoutMs / 1000}s. Push blocked.` };
     }
     if (r.status !== 0) {
@@ -131,7 +166,7 @@ function evaluate({ command, cwd, dataDir }) {
         allow: false,
         reason:
           `QA AI OS push gate: "${name}" failed (exit ${r.status}). Push blocked.\n` +
-          `Command: ${gate.run}\nLast ${OUTPUT_TAIL_LINES} lines:\n${tail(output, OUTPUT_TAIL_LINES)}`,
+          `Command: ${gate.builtin ? `builtin:${gate.builtin}` : gate.run}\nLast ${OUTPUT_TAIL_LINES} lines:\n${tail(output, OUTPUT_TAIL_LINES)}`,
       };
     }
   }

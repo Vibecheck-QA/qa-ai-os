@@ -219,6 +219,68 @@ test('a pass whose receipt cannot be written blocks the push', () => {
   assert.match(r.stderr, /receipt could not be written/);
 });
 
+// A committed project with a function, its test and a mutants list.
+function mutateRepo(mutants) {
+  const repo = makeRepo({ gates: [{ name: 'mutation', builtin: 'mutate' }] });
+  fs.writeFileSync(path.join(repo.dir, 'calc.js'), 'module.exports.add = (a, b) => a + b;\nmodule.exports.untested = () => 1;\n');
+  fs.writeFileSync(path.join(repo.dir, 'test.js'), "require('assert').strictEqual(require('./calc.js').add(2, 3), 5);\n");
+  fs.mkdirSync(path.join(repo.dir, '.qa-ai-os'));
+  fs.writeFileSync(path.join(repo.dir, '.qa-ai-os', 'mutants.json'), JSON.stringify({ run: 'node test.js', mutants }));
+  repo.g('add', '-A');
+  repo.g('commit', '-q', '-m', 'project');
+  return repo;
+}
+const ADD = { name: 'add subtracts', file: 'calc.js', find: 'a + b', replace: 'a - b' };
+
+test('builtin mutate gate: every mutant killed lets the push through, with a receipt', () => {
+  const { dir, g } = mutateRepo([ADD]);
+  const r = runHook('git push', dir, dataDir());
+  assert.strictEqual(r.status, 0, r.stderr);
+  const receipt = JSON.parse(fs.readFileSync(receiptOf(dir, g).file, 'utf8'));
+  assert.strictEqual(receipt.gates[0].run, 'builtin:mutate');
+  assert.match(receipt.gates[0].output, /1 of 1 mutants killed/);
+});
+
+test('builtin mutate gate: a surviving mutant blocks the push and is named', () => {
+  const { dir } = mutateRepo([ADD, { name: 'untested returns 2', file: 'calc.js', find: '=> 1', replace: '=> 2' }]);
+  const r = runHook('git push', dir, dataDir());
+  assert.strictEqual(r.status, 2);
+  assert.match(r.stderr, /"mutation" failed/);
+  assert.match(r.stderr, /SURVIVED +untested returns 2/);
+});
+
+test('a gate with no command or an unknown builtin blocks the push', () => {
+  for (const gate of [{ name: 'x', builtin: 'nope' }, { name: 'y' }]) {
+    const { dir } = makeRepo({ gates: [gate] });
+    const r = runHook('git push', dir, dataDir());
+    assert.strictEqual(r.status, 2);
+    assert.match(r.stderr, /no "run" command or a known "builtin"/);
+  }
+});
+
+test('a gate that hangs is killed with everything it started, and the push is blocked', () => {
+  const hang = 'node -e "require(\'fs\').writeFileSync(\'hang.pid\', String(process.pid)); for (;;) {}"';
+  const { dir } = makeRepo({ gates: [{ name: 'hangs', run: hang, timeoutSeconds: 2 }] });
+  const r = runHook('git push', dir, dataDir());
+  const pid = Number(fs.readFileSync(path.join(dir, 'hang.pid'), 'utf8'));
+  const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  try {
+    assert.strictEqual(r.status, 2);
+    assert.match(r.stderr, /"hangs" timed out/);
+    assert.strictEqual(alive(), false, 'the hung gate must not be left running');
+  } finally {
+    if (alive()) process.kill(pid);
+  }
+});
+
+test('an interrupted mutation run blocks the push until it is put back', () => {
+  const { dir } = makeRepo({ gates: [{ name: 'tests', run: PASS }] });
+  fs.mkdirSync(path.join(dir, '.qa-ai-os', 'mutate-backup'), { recursive: true }); // untracked
+  const r = runHook('git push', dir, dataDir());
+  assert.strictEqual(r.status, 2);
+  assert.match(r.stderr, /mutation run was interrupted/);
+});
+
 test('rejection path: a failure is NOT cached, so the next push re-runs the gate', () => {
   const marker = 'node -e "require(\'fs\').appendFileSync(\'runs.txt\',\'x\'); process.exit(require(\'fs\').existsSync(\'ok\') ? 0 : 1)"';
   const { dir } = makeRepo({ gates: [{ name: 'flaky', run: marker }] });
